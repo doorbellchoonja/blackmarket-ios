@@ -19,9 +19,12 @@
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>UILaunchScreen</key>
-    <dict/>
+    <dict>
+        <key>UIColorName</key>
+        <string>black</string>
+    </dict>
 
-    <!-- 앱 아이콘 설정 -->
+    <!-- 앱 아이콘 리소스 -->
     <key>CFBundleIcons</key>
     <dict>
         <key>CFBundlePrimaryIcon</key>
@@ -35,10 +38,12 @@
         </dict>
     </dict>
 
-    <!-- 커스텀 URL 스키마 설정 (blackmarket://) -->
+    <!-- 커스텀 URL 스키마 등록 (blackmarket://) -->
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
             <key>CFBundleURLName</key>
             <string>com.worksin.one</string>
             <key>CFBundleURLSchemes</key>
