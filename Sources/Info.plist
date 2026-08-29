@@ -21,7 +21,21 @@
     <key>UILaunchScreen</key>
     <dict/>
 
-    <!-- 커스텀 URL 스키마 설정 -->
+    <!-- 앱 아이콘 설정 -->
+    <key>CFBundleIcons</key>
+    <dict>
+        <key>CFBundlePrimaryIcon</key>
+        <dict>
+            <key>CFBundleIconFiles</key>
+            <array>
+                <string>AppIcon60x60</string>
+            </array>
+            <key>CFBundleIconName</key>
+            <string>AppIcon</string>
+        </dict>
+    </dict>
+
+    <!-- 커스텀 URL 스키마 설정 (blackmarket://) -->
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
