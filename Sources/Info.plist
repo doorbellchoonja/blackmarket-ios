@@ -21,7 +21,13 @@
     <key>UILaunchScreen</key>
     <dict/>
 
-    <!-- 앱 아이콘 리소스 -->
+    <!-- 백그라운드 푸시 알림 모드 활성화 -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>remote-notification</string>
+    </array>
+
+    <!-- 앱 아이콘 설정 -->
     <key>CFBundleIcons</key>
     <dict>
         <key>CFBundlePrimaryIcon</key>
@@ -35,7 +41,7 @@
         </dict>
     </dict>
 
-    <!-- 커스텀 URL 스키마 등록 (blackmarket://) -->
+    <!-- 커스텀 URL 스키마 (blackmarket://) -->
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
@@ -50,7 +56,6 @@
         </dict>
     </array>
 
-    <!-- Passkey / Face ID / Touch ID 웹 자격증명 허용 -->
     <key>NSFaceIDUsageDescription</key>
     <string>Black Market 패스키 로그인 및 본인 인증을 위해 생체 인식이 필요합니다.</string>
 </dict>
