@@ -20,10 +20,8 @@ jobs:
           BASE_VERSION="1.0"
           BUILD_NUMBER=${{ github.run_number }}
           FULL_VERSION="${BASE_VERSION}.${BUILD_NUMBER}"
-          
           echo "APP_VERSION=${FULL_VERSION}" >> $GITHUB_ENV
           echo "BUILD_NUM=${BUILD_NUMBER}" >> $GITHUB_ENV
-          echo "Generated Version: ${FULL_VERSION}"
 
       - name: Extract Certificate and Key
         env:
@@ -49,15 +47,23 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "actions" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH"
 
-      - name: Build iOS Executable
+      # [보안 빌드] 난독화 컴파일 및 심볼 스트립 적용
+      - name: Build Secure Obfuscated iOS Binary
         run: |
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           
+          # -O : 코드 최적화 및 인라인 처리 (역공학 구조 파괴)
+          # -whole-module-optimization : 전체 모듈 압축
           swiftc -target arm64-apple-ios15.0 \
                  -sdk "$SDK_PATH" \
+                 -O \
+                 -whole-module-optimization \
                  -parse-as-library \
                  Sources/App.swift \
                  -o BlackMarket
+
+          # 바이너리 내 모든 디버그/함수 심볼 강제 파괴 (IDA Pro/Ghidra 분석 방해)
+          strip -r -u BlackMarket
 
       - name: Package and Sign IPA
         run: |
@@ -88,7 +94,6 @@ jobs:
           zip -r "$IPA_FILENAME" Payload
           echo "IPA_FILENAME=${IPA_FILENAME}" >> $GITHUB_ENV
 
-      # Releases 탭에 압축되지 않은 순수 .ipa 파일 등록
       - name: Publish Pure IPA to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
