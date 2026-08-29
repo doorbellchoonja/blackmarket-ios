@@ -1,4 +1,4 @@
-name: Build Signed IPA
+name: IPA 빌드하기
 
 on:
   workflow_dispatch:
@@ -10,6 +10,20 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Calculate Dynamic Version
+        id: versioning
+        run: |
+          # 기본 메이저.마이너 버전 설정 (필요시 변경 가능)
+          BASE_VERSION="1.0"
+          
+          # GitHub 빌드 횟수 번호(자동 증가)
+          BUILD_NUMBER=${{ github.run_number }}
+          
+          FULL_VERSION="${BASE_VERSION}.${BUILD_NUMBER}"
+          echo "APP_VERSION=${FULL_VERSION}" >> $GITHUB_ENV
+          echo "BUILD_NUM=${BUILD_NUMBER}" >> $GITHUB_ENV
+          echo "Generated Version: ${FULL_VERSION}"
 
       - name: Extract Certificate and Key
         env:
@@ -49,31 +63,38 @@ jobs:
         run: |
           mkdir -p Payload/BlackMarket.app
           
+          # 1. 바이너리 및 기본 파일 복사
           cp BlackMarket Payload/BlackMarket.app/BlackMarket
           cp Sources/Info.plist Payload/BlackMarket.app/Info.plist
           cp certs/profile.mobileprovision Payload/BlackMarket.app/embedded.mobileprovision
           
+          # 2. Info.plist 내부 버전을 빌드 번호로 자동 주입
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" Payload/BlackMarket.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUM" Payload/BlackMarket.app/Info.plist
+          
+          # 3. 앱 아이콘 리사이징
           if [ -f "Sources/AppIcon.png" ]; then
             sips -z 120 120 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60@2x.png
             sips -z 180 180 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60@3x.png
             sips -z 120 120 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60.png
           fi
 
-          # 1. 프로비저닝 프로파일에서 entitlements 자동 추출
+          # 4. entitlements 추출 및 코드 서명
           security cms -D -i certs/profile.mobileprovision > $RUNNER_TEMP/provision.plist
           /usr/libexec/PlistBuddy -x -c 'Print :Entitlements' $RUNNER_TEMP/provision.plist > $RUNNER_TEMP/entitlements.plist
 
-          # 2. 인증서 ID 추출
           CERT_ID=$(security find-identity -v -p codesigning $RUNNER_TEMP/build.keychain-db | head -n 1 | awk -F'"' '{print $2}')
           echo "Signing with: $CERT_ID"
 
-          # 3. entitlements를 포함한 정식 코드 서명
           codesign --force --deep --sign "$CERT_ID" --entitlements $RUNNER_TEMP/entitlements.plist --timestamp=none Payload/BlackMarket.app
           
-          zip -r BlackMarket-Signed.ipa Payload
+          # 5. 버전이 포함된 파일명으로 압축 (예: BlackMarket-v1.0.12.ipa)
+          IPA_FILENAME="BlackMarket-v${APP_VERSION}.ipa"
+          zip -r "$IPA_FILENAME" Payload
+          echo "IPA_FILENAME=${IPA_FILENAME}" >> $GITHUB_ENV
 
       - name: Upload Signed IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BlackMarket-Signed-IPA
-          path: BlackMarket-Signed.ipa
+          name: BlackMarket-Signed-v${{ env.APP_VERSION }}
+          path: ${{ env.IPA_FILENAME }}
