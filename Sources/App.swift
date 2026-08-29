@@ -1,9 +1,75 @@
 import SwiftUI
 import WebKit
+import UserNotifications
 import AuthenticationServices
 
+// MARK: - AppDelegate: APNs 토큰 수신 및 포그라운드 알림 처리
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    static var deviceTokenString: String?
+
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        
+        // 1. 알림 권한 요청 및 APNs 등록
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+            if granted {
+                DispatchQueue.main.async {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+            }
+        }
+        return true
+    }
+
+    // 2. APNs 디바이스 토큰 성공적 수신
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        let tokenParts = deviceToken.map { String(format: "%02.2hhx", $0) }
+        let token = tokenParts.joined()
+        AppDelegate.deviceTokenString = token
+        print("Device Token: \(token)")
+        
+        // 서버로 토큰 전송 시도
+        sendTokenToServer(token: token)
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        print("Failed to register for notifications: \(error.localizedDescription)")
+    }
+
+    // 앱 실행 중(포그라운드)일 때도 상단 배너 알림 표시
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound, .badge])
+    }
+}
+
+// MARK: - 서버 토큰 등록 함수
+func sendTokenToServer(token: String) {
+    guard let url = URL(string: "https://web.black-market.store/api/push/register-device-token") else { return }
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    
+    let body: [String: Any] = [
+        "device_token": token,
+        "platform": "ios",
+        "bundle_id": "com.worksin.one"
+    ]
+    
+    request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+    
+    URLSession.shared.dataTask(with: request) { data, response, error in
+        if let error = error {
+            print("Token registration error: \(error)")
+        } else if let httpResponse = response as? HTTPURLResponse {
+            print("Token registered with status: \(httpResponse.statusCode)")
+        }
+    }.resume()
+}
+
+// MARK: - 메인 앱 엔트리포인트
 @main
 struct BlackMarketApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @State private var currentURL: URL = URL(string: "https://web.black-market.store")!
     @State private var isLoading: Bool = true
 
@@ -13,9 +79,8 @@ struct BlackMarketApp: App {
                 Color.black.edgesIgnoringSafeArea(.all)
 
                 WebViewContainer(url: currentURL, isLoading: $isLoading)
-                    .edgesIgnoringSafeArea(.all)
+                    .ignoresSafeArea(.keyboard)
 
-                // 로딩 화면 (최대 1.0초 후 무조건 부드럽게 사라짐)
                 if isLoading {
                     CustomLoadingOverlay()
                         .transition(.opacity.animation(.easeOut(duration: 0.2)))
@@ -23,7 +88,6 @@ struct BlackMarketApp: App {
                 }
             }
             .onAppear {
-                // [핵심] 1.0초 이상 로딩 화면에 머무르지 않도록 강제 해제
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     withAnimation {
                         self.isLoading = false
@@ -41,7 +105,7 @@ struct BlackMarketApp: App {
     }
 }
 
-// MARK: - 로딩 화면 UI
+// MARK: - 로딩 화면
 struct CustomLoadingOverlay: View {
     @State private var isPulsing = false
     @State private var rotateDegree: Double = 0
@@ -94,7 +158,7 @@ struct CustomLoadingOverlay: View {
     }
 }
 
-// MARK: - 웹뷰
+// MARK: - 웹뷰 (토큰 브릿지 & Passkey & Safe Area 대응)
 struct WebViewContainer: UIViewRepresentable {
     let url: URL
     @Binding var isLoading: Bool
@@ -107,7 +171,12 @@ struct WebViewContainer: UIViewRepresentable {
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
 
+        let userContentController = WKUserContentController()
+        // 웹페이지 JS에서 window.webkit.messageHandlers.pushBridge.postMessage(...) 호출 수신
+        userContentController.add(context.coordinator, name: "pushBridge")
+
         let config = WKWebViewConfiguration()
+        config.userContentController = userContentController
         config.defaultWebpagePreferences = prefs
         config.allowsInlineMediaPlayback = true
         config.websiteDataStore = WKWebsiteDataStore.default()
@@ -118,9 +187,8 @@ struct WebViewContainer: UIViewRepresentable {
         webView.backgroundColor = .black
         webView.isOpaque = false
         webView.scrollView.bounces = true
-        webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.scrollView.contentInsetAdjustmentBehavior = .automatic
 
-        // 진행률이 30%만 넘어도(초기 HTML 수신 즉시) 로딩 닫기
         context.coordinator.setupProgressObserver(for: webView)
 
         let request = URLRequest(url: url)
@@ -135,7 +203,7 @@ struct WebViewContainer: UIViewRepresentable {
         }
     }
 
-    class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         var parent: WebViewContainer
         private var observation: NSKeyValueObservation?
 
@@ -145,7 +213,6 @@ struct WebViewContainer: UIViewRepresentable {
 
         func setupProgressObserver(for webView: WKWebView) {
             observation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] webView, _ in
-                // 웹페이지 기본 HTML만 들어오면 즉시 로딩 오버레이 제거
                 if webView.estimatedProgress >= 0.3 {
                     DispatchQueue.main.async {
                         self?.parent.isLoading = false
@@ -154,8 +221,16 @@ struct WebViewContainer: UIViewRepresentable {
             }
         }
 
+        // 웹에서 JS로 토큰을 요청하거나 보낼 때 처리
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == "pushBridge" {
+                if let token = AppDelegate.deviceTokenString {
+                    sendTokenToServer(token: token)
+                }
+            }
+        }
+
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-            // 웹 화면 그리기 시작 즉시 로딩 끄기
             DispatchQueue.main.async {
                 self.parent.isLoading = false
             }
@@ -164,6 +239,13 @@ struct WebViewContainer: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             DispatchQueue.main.async {
                 self.parent.isLoading = false
+            }
+            
+            // 웹페이지 DOM에 토큰 전역 변수 주입 (로그인 시 JS에서 활용 가능)
+            if let token = AppDelegate.deviceTokenString {
+                let js = "window.__DEVICE_TOKEN__ = '\(token)';"
+                webView.evaluateJavaScript(js, completionHandler: nil)
+                sendTokenToServer(token: token)
             }
         }
 
