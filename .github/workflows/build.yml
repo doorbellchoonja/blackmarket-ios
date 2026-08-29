@@ -18,17 +18,18 @@ jobs:
           PROVISIONING_BASE64: ${{ secrets.PROVISIONING_BASE64 }}
           KEYCHAIN_PASSWORD: "temporary-keychain-pass"
         run: |
-          # 1. Base64에서 파일 복원
-          echo "$P12_BASE64" | base64 --decode > certificate.p12
-          echo "$PROVISIONING_BASE64" | base64 --decode > embedded.mobileprovision
+          # 1. Base64 디코딩 (줄바꿈/공백 제거 후 안전 복원)
+          echo "$P12_BASE64" | tr -d '\r\n ' | base64 --decode > certificate.p12
+          echo "$PROVISIONING_BASE64" | tr -d '\r\n ' | base64 --decode > embedded.mobileprovision
 
-          # 2. 임시 키체인 생성 및 인증서 임포트
+          # 2. 임시 키체인 생성 및 잠금 해제
           KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain-db
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          security import certificate.p12 -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          # 3. p12 인증서 임포트
+          security import certificate.p12 -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH"
 
@@ -46,26 +47,26 @@ jobs:
         run: |
           mkdir -p Payload/BlackMarket.app
           
-          # 1. 바이너리 및 설정 파일 복사
+          # 1. 바이너리, Info.plist, 프로비저닝 프로파일 복사
           cp BlackMarket Payload/BlackMarket.app/BlackMarket
           cp Sources/Info.plist Payload/BlackMarket.app/Info.plist
           cp embedded.mobileprovision Payload/BlackMarket.app/embedded.mobileprovision
           
-          # 2. 아이콘 생성
+          # 2. 업로드된 아이콘 리사이징
           if [ -f "Sources/AppIcon.png" ]; then
             sips -z 120 120 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60@2x.png
             sips -z 180 180 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60@3x.png
             sips -z 120 120 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60.png
           fi
 
-          # 3. 키체인에서 인증서 ID(Common Name) 자동 추출
+          # 3. 키체인에서 인증서 ID(Common Name) 추출
           CERT_ID=$(security find-identity -v -p codesigning $RUNNER_TEMP/build.keychain-db | head -n 1 | awk -F'"' '{print $2}')
-          echo "Using signing certificate: $CERT_ID"
+          echo "Using certificate: $CERT_ID"
 
-          # 4. 정식 코드 서명 수행
+          # 4. 정식 코드 서명
           codesign --force --deep --sign "$CERT_ID" --timestamp=none Payload/BlackMarket.app
           
-          # 5. 서명된 IPA 압축
+          # 5. IPA 파일 생성
           zip -r BlackMarket-Signed.ipa Payload
 
       - name: Upload Signed IPA Artifact
