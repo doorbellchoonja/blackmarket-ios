@@ -22,8 +22,14 @@ jobs:
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          # 2. certs 폴더의 p12 파일을 키체인에 직접 임포트
-          security import certs/cert.p12 -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH" -T /usr/bin/codesign
+          # 2. 레거시(OpenSSL Legacy) p12 호환 변환 처리
+          openssl pkcs12 -in certs/cert.p12 -passin pass:"$P12_PASSWORD" -nodes -out $RUNNER_TEMP/temp_cert.pem -legacy 2>/dev/null || \
+          openssl pkcs12 -in certs/cert.p12 -passin pass:"$P12_PASSWORD" -nodes -out $RUNNER_TEMP/temp_cert.pem
+
+          # 3. macOS 호환 p12로 재포장 후 키체인에 임포트
+          openssl pkcs12 -export -in $RUNNER_TEMP/temp_cert.pem -out $RUNNER_TEMP/converted_cert.p12 -passout pass:"$P12_PASSWORD" -keypbe NONE -certpbe NONE -nomac
+          security import $RUNNER_TEMP/converted_cert.p12 -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH" -T /usr/bin/codesign
+          
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH"
 
@@ -60,7 +66,7 @@ jobs:
           # 4. 정식 코드 서명
           codesign --force --deep --sign "$CERT_ID" --timestamp=none Payload/BlackMarket.app
           
-          # 5. IPA 파일 압축
+          # 5. 서명된 IPA 압축
           zip -r BlackMarket-Signed.ipa Payload
 
       - name: Upload Signed IPA Artifact
