@@ -13,10 +13,8 @@ jobs:
 
       - name: Build iOS Executable
         run: |
-          # 1. iOS SDK 경로 가져오기
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           
-          # 2. iOS ARM64 바이너리로 컴파일
           swiftc -target arm64-apple-ios15.0 \
                  -sdk "$SDK_PATH" \
                  -parse-as-library \
@@ -27,16 +25,21 @@ jobs:
         run: |
           mkdir -p Payload/BlackMarket.app
           
-          # 컴파일된 실행 파일 복사
+          # 1. 실행 바이너리 및 Info.plist 복사
           cp BlackMarket Payload/BlackMarket.app/BlackMarket
-          
-          # Info.plist 복사
           cp Sources/Info.plist Payload/BlackMarket.app/Info.plist
           
-          # Unsigned 임시 서명 (더미 서명 주입으로 설치 호환성 확보)
+          # 2. 업로드된 이미지를 기반으로 규격별 iOS 아이콘 생성
+          if [ -f "Sources/AppIcon.png" ]; then
+            sips -z 120 120 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60@2x.png
+            sips -z 180 180 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60@3x.png
+            sips -z 120 120 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60.png
+          fi
+          
+          # 3. 임시 서명 (codesign)
           codesign --force --deep --sign - Payload/BlackMarket.app
           
-          # IPA 압축
+          # 4. IPA 압축 생성
           zip -r BlackMarket.ipa Payload
 
       - name: Upload IPA Artifact
