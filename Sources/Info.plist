@@ -5,7 +5,7 @@
     <key>CFBundleExecutable</key>
     <string>BlackMarket</string>
     <key>CFBundleIdentifier</key>
-    <string>store.blackmarket.app</string>
+    <string>com.worksin.one</string>
     <key>CFBundleName</key>
     <string>Black Market</string>
     <key>CFBundleDisplayName</key>
@@ -40,7 +40,7 @@
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>store.blackmarket.app</string>
+            <string>com.worksin.one</string>
             <key>CFBundleURLSchemes</key>
             <array>
                 <string>blackmarket</string>
