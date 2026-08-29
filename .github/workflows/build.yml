@@ -17,20 +17,17 @@ jobs:
         run: |
           mkdir -p $RUNNER_TEMP/certs_out
 
-          # 1. OpenSSL을 통해 p12에서 인증서와 개인키 분리 추출 (legacy 호환 대응)
           openssl pkcs12 -in certs/cert.p12 -passin pass:"$P12_PASSWORD" -clcerts -nokeys -out $RUNNER_TEMP/certs_out/cert.pem -legacy 2>/dev/null || \
           openssl pkcs12 -in certs/cert.p12 -passin pass:"$P12_PASSWORD" -clcerts -nokeys -out $RUNNER_TEMP/certs_out/cert.pem
 
           openssl pkcs12 -in certs/cert.p12 -passin pass:"$P12_PASSWORD" -nocerts -nodes -out $RUNNER_TEMP/certs_out/key.pem -legacy 2>/dev/null || \
           openssl pkcs12 -in certs/cert.p12 -passin pass:"$P12_PASSWORD" -nocerts -nodes -out $RUNNER_TEMP/certs_out/key.pem
 
-          # 2. 임시 키체인 생성 및 키/인증서 합본 등록
           KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain-db
           security create-keychain -p "actions" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "actions" "$KEYCHAIN_PATH"
 
-          # 3. 통합 PEM을 키체인에 추가
           cat $RUNNER_TEMP/certs_out/cert.pem $RUNNER_TEMP/certs_out/key.pem > $RUNNER_TEMP/certs_out/combined.pem
           openssl pkcs12 -export -in $RUNNER_TEMP/certs_out/combined.pem -out $RUNNER_TEMP/certs_out/rebuilt.p12 -passout pass:actions
           
@@ -52,25 +49,27 @@ jobs:
         run: |
           mkdir -p Payload/BlackMarket.app
           
-          # 1. 실행 바이너리, Info.plist, 프로비저닝 프로파일 복사
           cp BlackMarket Payload/BlackMarket.app/BlackMarket
           cp Sources/Info.plist Payload/BlackMarket.app/Info.plist
           cp certs/profile.mobileprovision Payload/BlackMarket.app/embedded.mobileprovision
           
-          # 2. 앱 아이콘 생성
           if [ -f "Sources/AppIcon.png" ]; then
             sips -z 120 120 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60@2x.png
             sips -z 180 180 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60@3x.png
             sips -z 120 120 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60.png
           fi
 
-          # 3. 인증서 ID 자동 추출 후 서명
+          # 1. 프로비저닝 프로파일에서 entitlements 자동 추출
+          security cms -D -i certs/profile.mobileprovision > $RUNNER_TEMP/provision.plist
+          /usr/libexec/PlistBuddy -x -c 'Print :Entitlements' $RUNNER_TEMP/provision.plist > $RUNNER_TEMP/entitlements.plist
+
+          # 2. 인증서 ID 추출
           CERT_ID=$(security find-identity -v -p codesigning $RUNNER_TEMP/build.keychain-db | head -n 1 | awk -F'"' '{print $2}')
           echo "Signing with: $CERT_ID"
 
-          codesign --force --deep --sign "$CERT_ID" --timestamp=none Payload/BlackMarket.app
+          # 3. entitlements를 포함한 정식 코드 서명
+          codesign --force --deep --sign "$CERT_ID" --entitlements $RUNNER_TEMP/entitlements.plist --timestamp=none Payload/BlackMarket.app
           
-          # 4. 서명된 IPA 압축
           zip -r BlackMarket-Signed.ipa Payload
 
       - name: Upload Signed IPA Artifact
