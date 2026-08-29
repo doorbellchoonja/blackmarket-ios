@@ -1,7 +1,7 @@
 name: Build Unsigned IPA
 
 on:
-  workflow_dispatch: # Actions 탭에서 수동 실행
+  workflow_dispatch:
 
 jobs:
   build:
@@ -13,13 +13,30 @@ jobs:
 
       - name: Build iOS Executable
         run: |
-          swift build -c release --triple arm64-apple-ios15.0
+          # 1. iOS SDK 경로 가져오기
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          
+          # 2. iOS ARM64 바이너리로 컴파일
+          swiftc -target arm64-apple-ios15.0 \
+                 -sdk "$SDK_PATH" \
+                 -parse-as-library \
+                 Sources/App.swift \
+                 -o BlackMarket
 
       - name: Package Payload and IPA
         run: |
           mkdir -p Payload/BlackMarket.app
-          cp .build/arm64-apple-ios15.0/release/BlackMarket Payload/BlackMarket.app/BlackMarket
+          
+          # 컴파일된 실행 파일 복사
+          cp BlackMarket Payload/BlackMarket.app/BlackMarket
+          
+          # Info.plist 복사
           cp Sources/Info.plist Payload/BlackMarket.app/Info.plist
+          
+          # Unsigned 임시 서명 (더미 서명 주입으로 설치 호환성 확보)
+          codesign --force --deep --sign - Payload/BlackMarket.app
+          
+          # IPA 압축
           zip -r BlackMarket.ipa Payload
 
       - name: Upload IPA Artifact
