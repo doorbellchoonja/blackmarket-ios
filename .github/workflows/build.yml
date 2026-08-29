@@ -11,26 +11,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Apple Certificate and Provisioning Profile
+      - name: Extract Certificate and Key
         env:
           P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
-          KEYCHAIN_PASSWORD: "temporary-keychain-pass"
         run: |
-          # 1. 임시 키체인 생성 및 잠금 해제
+          mkdir -p $RUNNER_TEMP/certs_out
+
+          # 1. OpenSSL을 통해 p12에서 인증서와 개인키 분리 추출 (legacy 호환 대응)
+          openssl pkcs12 -in certs/cert.p12 -passin pass:"$P12_PASSWORD" -clcerts -nokeys -out $RUNNER_TEMP/certs_out/cert.pem -legacy 2>/dev/null || \
+          openssl pkcs12 -in certs/cert.p12 -passin pass:"$P12_PASSWORD" -clcerts -nokeys -out $RUNNER_TEMP/certs_out/cert.pem
+
+          openssl pkcs12 -in certs/cert.p12 -passin pass:"$P12_PASSWORD" -nocerts -nodes -out $RUNNER_TEMP/certs_out/key.pem -legacy 2>/dev/null || \
+          openssl pkcs12 -in certs/cert.p12 -passin pass:"$P12_PASSWORD" -nocerts -nodes -out $RUNNER_TEMP/certs_out/key.pem
+
+          # 2. 임시 키체인 생성 및 키/인증서 합본 등록
           KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain-db
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security create-keychain -p "actions" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security unlock-keychain -p "actions" "$KEYCHAIN_PATH"
 
-          # 2. 레거시(OpenSSL Legacy) p12 호환 변환 처리
-          openssl pkcs12 -in certs/cert.p12 -passin pass:"$P12_PASSWORD" -nodes -out $RUNNER_TEMP/temp_cert.pem -legacy 2>/dev/null || \
-          openssl pkcs12 -in certs/cert.p12 -passin pass:"$P12_PASSWORD" -nodes -out $RUNNER_TEMP/temp_cert.pem
-
-          # 3. macOS 호환 p12로 재포장 후 키체인에 임포트
-          openssl pkcs12 -export -in $RUNNER_TEMP/temp_cert.pem -out $RUNNER_TEMP/converted_cert.p12 -passout pass:"$P12_PASSWORD" -keypbe NONE -certpbe NONE -nomac
-          security import $RUNNER_TEMP/converted_cert.p12 -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH" -T /usr/bin/codesign
+          # 3. 통합 PEM을 키체인에 추가
+          cat $RUNNER_TEMP/certs_out/cert.pem $RUNNER_TEMP/certs_out/key.pem > $RUNNER_TEMP/certs_out/combined.pem
+          openssl pkcs12 -export -in $RUNNER_TEMP/certs_out/combined.pem -out $RUNNER_TEMP/certs_out/rebuilt.p12 -passout pass:actions
           
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import $RUNNER_TEMP/certs_out/rebuilt.p12 -P actions -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "actions" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH"
 
       - name: Build iOS Executable
@@ -47,26 +52,25 @@ jobs:
         run: |
           mkdir -p Payload/BlackMarket.app
           
-          # 1. 바이너리, Info.plist, 프로비저닝 프로파일 복사
+          # 1. 실행 바이너리, Info.plist, 프로비저닝 프로파일 복사
           cp BlackMarket Payload/BlackMarket.app/BlackMarket
           cp Sources/Info.plist Payload/BlackMarket.app/Info.plist
           cp certs/profile.mobileprovision Payload/BlackMarket.app/embedded.mobileprovision
           
-          # 2. 아이콘 리사이징
+          # 2. 앱 아이콘 생성
           if [ -f "Sources/AppIcon.png" ]; then
             sips -z 120 120 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60@2x.png
             sips -z 180 180 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60@3x.png
             sips -z 120 120 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60.png
           fi
 
-          # 3. 키체인에서 인증서 ID(Common Name) 추출
+          # 3. 인증서 ID 자동 추출 후 서명
           CERT_ID=$(security find-identity -v -p codesigning $RUNNER_TEMP/build.keychain-db | head -n 1 | awk -F'"' '{print $2}')
-          echo "Using certificate: $CERT_ID"
+          echo "Signing with: $CERT_ID"
 
-          # 4. 정식 코드 서명
           codesign --force --deep --sign "$CERT_ID" --timestamp=none Payload/BlackMarket.app
           
-          # 5. 서명된 IPA 압축
+          # 4. 서명된 IPA 압축
           zip -r BlackMarket-Signed.ipa Payload
 
       - name: Upload Signed IPA Artifact
