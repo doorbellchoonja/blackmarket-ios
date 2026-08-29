@@ -12,15 +12,22 @@ struct BlackMarketApp: App {
             ZStack {
                 Color.black.edgesIgnoringSafeArea(.all)
 
-                // 웹뷰 컨테이너 (패스키 및 현대적 웹 API 활성화)
                 WebViewContainer(url: currentURL, isLoading: $isLoading)
                     .edgesIgnoringSafeArea(.all)
 
-                // 커스텀 디자인 로딩 화면 (웹페이지 로드 완료 시 페이드아웃)
+                // 로딩 화면 (최대 1.0초 후 무조건 부드럽게 사라짐)
                 if isLoading {
                     CustomLoadingOverlay()
-                        .transition(.opacity.animation(.easeInOut(duration: 0.35)))
+                        .transition(.opacity.animation(.easeOut(duration: 0.2)))
                         .zIndex(2)
+                }
+            }
+            .onAppear {
+                // [핵심] 1.0초 이상 로딩 화면에 머무르지 않도록 강제 해제
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    withAnimation {
+                        self.isLoading = false
+                    }
                 }
             }
             .onOpenURL { url in
@@ -34,7 +41,7 @@ struct BlackMarketApp: App {
     }
 }
 
-// MARK: - 커스텀 디자인 로딩 화면
+// MARK: - 로딩 화면 UI
 struct CustomLoadingOverlay: View {
     @State private var isPulsing = false
     @State private var rotateDegree: Double = 0
@@ -43,67 +50,51 @@ struct CustomLoadingOverlay: View {
         ZStack {
             Color.black.edgesIgnoringSafeArea(.all)
 
-            VStack(spacing: 24) {
+            VStack(spacing: 20) {
                 ZStack {
-                    // 배경 네온 글로우 링
                     Circle()
                         .stroke(
                             LinearGradient(
-                                colors: [Color.white.opacity(0.6), Color.gray.opacity(0.1)],
+                                colors: [Color.white.opacity(0.8), Color.gray.opacity(0.2)],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             ),
-                            lineWidth: 3
+                            lineWidth: 2.5
                         )
-                        .frame(width: 90, height: 90)
+                        .frame(width: 76, height: 76)
                         .rotationEffect(.degrees(rotateDegree))
-                        .scaleEffect(isPulsing ? 1.05 : 0.95)
+                        .scaleEffect(isPulsing ? 1.03 : 0.97)
 
-                    // 블랙마켓 심볼 텍스트
-                    VStack(spacing: 2) {
+                    VStack(spacing: 1) {
                         Text("BLACK")
-                            .font(.system(size: 15, weight: .black, design: .monospaced))
+                            .font(.system(size: 14, weight: .heavy, design: .monospaced))
                             .foregroundColor(.white)
-                            .tracking(3)
+                            .tracking(2.5)
                         Text("MARKET")
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
                             .foregroundColor(.gray)
-                            .tracking(2)
+                            .tracking(1.8)
                     }
                 }
 
-                // 하단 상태 프로그레스 바
-                VStack(spacing: 8) {
-                    Capsule()
-                        .fill(Color.white.opacity(0.2))
-                        .frame(width: 120, height: 3)
-                        .overlay(
-                            Capsule()
-                                .fill(Color.white)
-                                .frame(width: 45, height: 3)
-                                .offset(x: isPulsing ? 35 : -35)
-                        )
-                        .clipped()
-
-                    Text("CONNECTING SECURELY...")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundColor(.gray.opacity(0.8))
-                        .tracking(1.5)
-                }
+                Text("CONNECTING...")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.8))
+                    .tracking(2)
             }
         }
         .onAppear {
-            withAnimation(.linear(duration: 1.8).repeatForever(autoreverses: false)) {
+            withAnimation(.linear(duration: 1.0).repeatForever(autoreverses: false)) {
                 rotateDegree = 360
             }
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
                 isPulsing = true
             }
         }
     }
 }
 
-// MARK: - 패스키(Passkey / WebAuthn) 지원 웹뷰
+// MARK: - 웹뷰
 struct WebViewContainer: UIViewRepresentable {
     let url: URL
     @Binding var isLoading: Bool
@@ -129,6 +120,9 @@ struct WebViewContainer: UIViewRepresentable {
         webView.scrollView.bounces = true
         webView.scrollView.contentInsetAdjustmentBehavior = .never
 
+        // 진행률이 30%만 넘어도(초기 HTML 수신 즉시) 로딩 닫기
+        context.coordinator.setupProgressObserver(for: webView)
+
         let request = URLRequest(url: url)
         webView.load(request)
         return webView
@@ -143,22 +137,33 @@ struct WebViewContainer: UIViewRepresentable {
 
     class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         var parent: WebViewContainer
+        private var observation: NSKeyValueObservation?
 
         init(_ parent: WebViewContainer) {
             self.parent = parent
         }
 
-        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        func setupProgressObserver(for webView: WKWebView) {
+            observation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] webView, _ in
+                // 웹페이지 기본 HTML만 들어오면 즉시 로딩 오버레이 제거
+                if webView.estimatedProgress >= 0.3 {
+                    DispatchQueue.main.async {
+                        self?.parent.isLoading = false
+                    }
+                }
+            }
+        }
+
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            // 웹 화면 그리기 시작 즉시 로딩 끄기
             DispatchQueue.main.async {
-                self.parent.isLoading = true
+                self.parent.isLoading = false
             }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                withAnimation {
-                    self.parent.isLoading = false
-                }
+            DispatchQueue.main.async {
+                self.parent.isLoading = false
             }
         }
 
@@ -174,7 +179,6 @@ struct WebViewContainer: UIViewRepresentable {
             }
         }
 
-        // WebAuthn / Passkey 팝업 및 보안 프로토콜 핸들러
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             if navigationAction.targetFrame == nil {
                 webView.load(navigationAction.request)
