@@ -10,7 +10,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         
-        // 1. 알림 권한 요청 및 APNs 등록
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             if granted {
                 DispatchQueue.main.async {
@@ -21,14 +20,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         return true
     }
 
-    // 2. APNs 디바이스 토큰 성공적 수신
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let tokenParts = deviceToken.map { String(format: "%02.2hhx", $0) }
         let token = tokenParts.joined()
         AppDelegate.deviceTokenString = token
         print("Device Token: \(token)")
         
-        // 서버로 토큰 전송 시도
         sendTokenToServer(token: token)
     }
 
@@ -36,13 +33,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         print("Failed to register for notifications: \(error.localizedDescription)")
     }
 
-    // 앱 실행 중(포그라운드)일 때도 상단 배너 알림 표시
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound, .badge])
     }
 }
 
-// MARK: - 서버 토큰 등록 함수
+// MARK: - 서버 토큰 전송 함수
 func sendTokenToServer(token: String) {
     guard let url = URL(string: "https://web.black-market.store/api/push/register-device-token") else { return }
     var request = URLRequest(url: url)
@@ -75,16 +71,24 @@ struct BlackMarketApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ZStack {
-                Color.black.edgesIgnoringSafeArea(.all)
+            GeometryReader { geometry in
+                ZStack(alignment: .top) {
+                    Color.black.edgesIgnoringSafeArea(.all)
 
-                WebViewContainer(url: currentURL, isLoading: $isLoading)
-                    .ignoresSafeArea(.keyboard)
+                    // 웹뷰 컨테이너 (상단 Safe Area 패딩을 직접 계산하여 밀어줌)
+                    VStack(spacing: 0) {
+                        Color.black
+                            .frame(height: geometry.safeAreaInsets.top)
+                        
+                        WebViewContainer(url: currentURL, isLoading: $isLoading)
+                    }
+                    .edgesIgnoringSafeArea(.all)
 
-                if isLoading {
-                    CustomLoadingOverlay()
-                        .transition(.opacity.animation(.easeOut(duration: 0.2)))
-                        .zIndex(2)
+                    if isLoading {
+                        CustomLoadingOverlay()
+                            .transition(.opacity.animation(.easeOut(duration: 0.2)))
+                            .zIndex(2)
+                    }
                 }
             }
             .onAppear {
@@ -158,7 +162,7 @@ struct CustomLoadingOverlay: View {
     }
 }
 
-// MARK: - 웹뷰 (토큰 브릿지 & Passkey & Safe Area 대응)
+// MARK: - 웹뷰 (Safe Area 상단 침범 완벽 방지)
 struct WebViewContainer: UIViewRepresentable {
     let url: URL
     @Binding var isLoading: Bool
@@ -172,7 +176,6 @@ struct WebViewContainer: UIViewRepresentable {
         prefs.allowsContentJavaScript = true
 
         let userContentController = WKUserContentController()
-        // 웹페이지 JS에서 window.webkit.messageHandlers.pushBridge.postMessage(...) 호출 수신
         userContentController.add(context.coordinator, name: "pushBridge")
 
         let config = WKWebViewConfiguration()
@@ -187,7 +190,7 @@ struct WebViewContainer: UIViewRepresentable {
         webView.backgroundColor = .black
         webView.isOpaque = false
         webView.scrollView.bounces = true
-        webView.scrollView.contentInsetAdjustmentBehavior = .automatic
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
 
         context.coordinator.setupProgressObserver(for: webView)
 
@@ -221,7 +224,6 @@ struct WebViewContainer: UIViewRepresentable {
             }
         }
 
-        // 웹에서 JS로 토큰을 요청하거나 보낼 때 처리
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             if message.name == "pushBridge" {
                 if let token = AppDelegate.deviceTokenString {
@@ -241,7 +243,6 @@ struct WebViewContainer: UIViewRepresentable {
                 self.parent.isLoading = false
             }
             
-            // 웹페이지 DOM에 토큰 전역 변수 주입 (로그인 시 JS에서 활용 가능)
             if let token = AppDelegate.deviceTokenString {
                 let js = "window.__DEVICE_TOKEN__ = '\(token)';"
                 webView.evaluateJavaScript(js, completionHandler: nil)
