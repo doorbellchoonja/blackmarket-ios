@@ -1,10 +1,14 @@
-name: Build Signed IPA
+name: Build ExamAuto IPA & Deploy OTA
 
 on:
+  push:
+    branches: [ "main" ]
   workflow_dispatch:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
   build:
@@ -24,16 +28,15 @@ jobs:
           echo "BUILD_NUM=${BUILD_NUMBER}" >> $GITHUB_ENV
 
       - name: Extract Certificate and Key
-        env:
-          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
         run: |
           mkdir -p $RUNNER_TEMP/certs_out
 
-          openssl pkcs12 -in certs/cert.p12 -passin pass:"$P12_PASSWORD" -clcerts -nokeys -out $RUNNER_TEMP/certs_out/cert.pem -legacy 2>/dev/null || \
-          openssl pkcs12 -in certs/cert.p12 -passin pass:"$P12_PASSWORD" -clcerts -nokeys -out $RUNNER_TEMP/certs_out/cert.pem
+          # 비밀번호 1을 사용하여 cert.p12에서 인증서 및 키 분리 추출
+          openssl pkcs12 -in certs/cert.p12 -passin pass:"1" -clcerts -nokeys -out $RUNNER_TEMP/certs_out/cert.pem -legacy 2>/dev/null || \
+          openssl pkcs12 -in certs/cert.p12 -passin pass:"1" -clcerts -nokeys -out $RUNNER_TEMP/certs_out/cert.pem
 
-          openssl pkcs12 -in certs/cert.p12 -passin pass:"$P12_PASSWORD" -nocerts -nodes -out $RUNNER_TEMP/certs_out/key.pem -legacy 2>/dev/null || \
-          openssl pkcs12 -in certs/cert.p12 -passin pass:"$P12_PASSWORD" -nocerts -nodes -out $RUNNER_TEMP/certs_out/key.pem
+          openssl pkcs12 -in certs/cert.p12 -passin pass:"1" -nocerts -nodes -out $RUNNER_TEMP/certs_out/key.pem -legacy 2>/dev/null || \
+          openssl pkcs12 -in certs/cert.p12 -passin pass:"1" -nocerts -nodes -out $RUNNER_TEMP/certs_out/key.pem
 
           KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain-db
           security create-keychain -p "actions" "$KEYCHAIN_PATH"
@@ -47,40 +50,31 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "actions" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH"
 
-      # [보안 빌드] 난독화 컴파일 및 심볼 스트립 적용
-      - name: Build Secure Obfuscated iOS Binary
+      - name: Build Secure iOS Binary
         run: |
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           
-          # -O : 코드 최적화 및 인라인 처리 (역공학 구조 파괴)
-          # -whole-module-optimization : 전체 모듈 압축
           swiftc -target arm64-apple-ios15.0 \
                  -sdk "$SDK_PATH" \
+                 -framework SwiftUI -framework WebKit -framework UIKit \
                  -O \
                  -whole-module-optimization \
                  -parse-as-library \
                  Sources/App.swift \
-                 -o BlackMarket
+                 -o ExamAuto
 
-          # 바이너리 내 모든 디버그/함수 심볼 강제 파괴 (IDA Pro/Ghidra 분석 방해)
-          strip -r -u BlackMarket
+          strip -r -u ExamAuto
 
       - name: Package and Sign IPA
         run: |
-          mkdir -p Payload/BlackMarket.app
+          mkdir -p Payload/ExamAuto.app
           
-          cp BlackMarket Payload/BlackMarket.app/BlackMarket
-          cp Sources/Info.plist Payload/BlackMarket.app/Info.plist
-          cp certs/profile.mobileprovision Payload/BlackMarket.app/embedded.mobileprovision
+          cp ExamAuto Payload/ExamAuto.app/ExamAuto
+          cp Sources/Info.plist Payload/ExamAuto.app/Info.plist
+          cp certs/profile.mobileprovision Payload/ExamAuto.app/embedded.mobileprovision
           
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" Payload/BlackMarket.app/Info.plist
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUM" Payload/BlackMarket.app/Info.plist
-          
-          if [ -f "Sources/AppIcon.png" ]; then
-            sips -z 120 120 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60@2x.png
-            sips -z 180 180 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60@3x.png
-            sips -z 120 120 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60.png
-          fi
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" Payload/ExamAuto.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUM" Payload/ExamAuto.app/Info.plist
 
           security cms -D -i certs/profile.mobileprovision > $RUNNER_TEMP/provision.plist
           /usr/libexec/PlistBuddy -x -c 'Print :Entitlements' $RUNNER_TEMP/provision.plist > $RUNNER_TEMP/entitlements.plist
@@ -88,19 +82,111 @@ jobs:
           CERT_ID=$(security find-identity -v -p codesigning $RUNNER_TEMP/build.keychain-db | head -n 1 | awk -F'"' '{print $2}')
           echo "Signing with: $CERT_ID"
 
-          codesign --force --deep --sign "$CERT_ID" --entitlements $RUNNER_TEMP/entitlements.plist --timestamp=none Payload/BlackMarket.app
+          codesign --force --deep --sign "$CERT_ID" --entitlements $RUNNER_TEMP/entitlements.plist --timestamp=none Payload/ExamAuto.app
           
-          IPA_FILENAME="BlackMarket-v${APP_VERSION}.ipa"
-          zip -r "$IPA_FILENAME" Payload
+          IPA_FILENAME="ExamAuto.ipa"
+          zip -qr "$IPA_FILENAME" Payload
           echo "IPA_FILENAME=${IPA_FILENAME}" >> $GITHUB_ENV
 
-      - name: Publish Pure IPA to GitHub Releases
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: "v${{ env.APP_VERSION }}"
-          name: "Black Market v${{ env.APP_VERSION }}"
-          files: ${{ env.IPA_FILENAME }}
-          draft: false
-          prerelease: false
+      - name: Setup OTA Manifest & Pages Web
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_OWNER: ${{ github.repository_owner }}
+          GH_REPO: ${{ github.event.repository.name }}
+        run: |
+          mkdir -p public
+          cp ExamAuto.ipa public/ExamAuto.ipa
+
+          BASE_URL="https://${GH_OWNER}.github.io/${GH_REPO}"
+
+          # OTA 필수 더미 아이콘 생성
+          echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" | base64 --decode > public/icon57.png
+          cp public/icon57.png public/icon512.png
+
+          cat << EOF > public/manifest.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>items</key>
+              <array>
+                  <dict>
+                      <key>assets</key>
+                      <array>
+                          <dict>
+                              <key>kind</key>
+                              <string>software-package</string>
+                              <key>url</key>
+                              <string>${BASE_URL}/ExamAuto.ipa</string>
+                          </dict>
+                          <dict>
+                              <key>kind</key>
+                              <string>display-image</string>
+                              <key>needs-shine</key>
+                              <false/>
+                              <key>url</key>
+                              <string>${BASE_URL}/icon57.png</string>
+                          </dict>
+                          <dict>
+                              <key>kind</key>
+                              <string>full-size-image</string>
+                              <key>needs-shine</key>
+                              <false/>
+                              <key>url</key>
+                              <string>${BASE_URL}/icon512.png</string>
+                          </dict>
+                      </array>
+                      <key>metadata</key>
+                      <dict>
+                          <key>bundle-identifier</key>
+                          <string>com.worksin.one</string>
+                          <key>bundle-version</key>
+                          <string>${APP_VERSION}</string>
+                          <key>kind</key>
+                          <string>software</string>
+                          <key>title</key>
+                          <string>ExamAuto</string>
+                      </dict>
+                  </dict>
+              </array>
+          </dict>
+          </plist>
+          EOF
+
+          cat << EOF > public/index.html
+          <!DOCTYPE html>
+          <html lang="ko">
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>ExamAuto OTA 설치</title>
+              <style>
+                  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f2f2f7; }
+                  .card { background: white; padding: 32px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.06); text-align: center; max-width: 85%; width: 320px; }
+                  .btn { display: block; background-color: #007aff; color: white; padding: 15px 0; text-decoration: none; border-radius: 14px; font-size: 17px; font-weight: 600; margin-top: 24px; box-shadow: 0 4px 10px rgba(0,122,255,0.3); }
+              </style>
+          </head>
+          <body>
+              <div class="card">
+                  <h2 style="margin:0 0 8px 0; color:#1c1c1e;">ExamAuto</h2>
+                  <p style="margin:0; color:#8e8e93; font-size:14px;">Safari에서 아래 버튼을 눌러 설치하세요.</p>
+                  <a class="btn" href="itms-services://?action=download-manifest&url=${BASE_URL}/manifest.plist">설치하기</a>
+              </div>
+          </body>
+          </html>
+          EOF
+
+      - name: GitHub Pages 아티팩트 업로드
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: GitHub Pages 배포
+        id: deployment
+        uses: actions/deploy-pages@v4
