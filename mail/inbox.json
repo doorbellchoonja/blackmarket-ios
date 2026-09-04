@@ -1,6 +1,13 @@
 {
   "mails": [
     {
+      "id": 1788542436301,
+      "target_device_id": "ALL",
+      "title": "jjd",
+      "content": "rhhe",
+      "date": "2026-09-04"
+    },
+    {
       "id": 1788542410704,
       "target_device_id": "F71AB1AA-9632-463E-A14D-42C74146B922",
       "title": "test",
