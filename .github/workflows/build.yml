@@ -47,13 +47,10 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "actions" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH"
 
-      # [보안 빌드] 난독화 컴파일 및 심볼 스트립 적용
-      - name: Build Secure Obfuscated iOS Binary
+      - name: Build Secure iOS Binary
         run: |
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           
-          # -O : 코드 최적화 및 인라인 처리 (역공학 구조 파괴)
-          # -whole-module-optimization : 전체 모듈 압축
           swiftc -target arm64-apple-ios15.0 \
                  -sdk "$SDK_PATH" \
                  -O \
@@ -62,10 +59,9 @@ jobs:
                  Sources/App.swift \
                  -o BlackMarket
 
-          # 바이너리 내 모든 디버그/함수 심볼 강제 파괴 (IDA Pro/Ghidra 분석 방해)
           strip -r -u BlackMarket
 
-      - name: Package and Sign IPA
+      - name: Package and Sign IPA with Passkey Entitlements
         run: |
           mkdir -p Payload/BlackMarket.app
           
@@ -82,8 +78,13 @@ jobs:
             sips -z 120 120 Sources/AppIcon.png --out Payload/BlackMarket.app/AppIcon60x60.png
           fi
 
+          # 1. 프로비저닝 프로파일에서 기본 권한 추출
           security cms -D -i certs/profile.mobileprovision > $RUNNER_TEMP/provision.plist
           /usr/libexec/PlistBuddy -x -c 'Print :Entitlements' $RUNNER_TEMP/provision.plist > $RUNNER_TEMP/entitlements.plist
+
+          # 2. 패스키/웹자격증명 도메인(webcredentials) 권한 자동 주입
+          /usr/libexec/PlistBuddy -c "Add :com.apple.developer.associated-domains array" $RUNNER_TEMP/entitlements.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :com.apple.developer.associated-domains:0 string webcredentials:web.black-market.store" $RUNNER_TEMP/entitlements.plist 2>/dev/null || true
 
           CERT_ID=$(security find-identity -v -p codesigning $RUNNER_TEMP/build.keychain-db | head -n 1 | awk -F'"' '{print $2}')
           echo "Signing with: $CERT_ID"
