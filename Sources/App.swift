@@ -3,6 +3,19 @@ import WebKit
 import UserNotifications
 import AuthenticationServices
 
+// MARK: - 우편(메일) 모델
+struct MailItem: Identifiable, Codable {
+    let id: Int
+    let target_device_id: String
+    let title: String
+    let content: String
+    let date: String
+}
+
+struct MailResponse: Codable {
+    let mails: [MailItem]
+}
+
 // MARK: - AppDelegate
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     static var deviceTokenString: String?
@@ -25,15 +38,15 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 }
 
-// MARK: - 메인 앱 엔트리포인트
+// MARK: - 메인 앱
 @main
 struct BlackMarketApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @State private var currentURL: URL = URL(string: "https://web.black-market.store")!
     @State private var isLoading: Bool = true
     @State private var showInfoSheet: Bool = false
+    @State private var showMailSheet: Bool = false
     
-    // 웹뷰 네비게이션 제어 상태
     @State private var canGoBack: Bool = false
     @State private var canGoForward: Bool = false
     @State private var webAction: WebAction = .none
@@ -51,7 +64,6 @@ struct BlackMarketApp: App {
                 ZStack(alignment: .bottom) {
                     Color.black.edgesIgnoringSafeArea(.all)
 
-                    // 웹뷰 레이아웃 (상단 노치 패딩 보정)
                     VStack(spacing: 0) {
                         Color.black.frame(height: geometry.safeAreaInsets.top)
                         WebViewContainer(
@@ -64,19 +76,19 @@ struct BlackMarketApp: App {
                     }
                     .edgesIgnoringSafeArea(.all)
 
-                    // 플로팅 리퀴드 글래스 하단 컨트롤 바
+                    // 하단 리퀴드 글래스 컨트롤 바
                     LiquidGlassNavigationBar(
                         canGoBack: canGoBack,
                         canGoForward: canGoForward,
                         onBack: { webAction = .goBack },
                         onForward: { webAction = .goForward },
                         onReload: { webAction = .reload },
+                        onMail: { showMailSheet = true },
                         onInfo: { showInfoSheet = true }
                     )
-                    .padding(.bottom, max(geometry.safeAreaInsets.bottom, 12))
-                    .padding(.horizontal, 24)
+                    .padding(.bottom, max(geometry.safeAreaInsets.bottom, 16) + 28)
+                    .padding(.horizontal, 20)
 
-                    // 로딩 오버레이
                     if isLoading {
                         CustomLoadingOverlay()
                             .transition(.opacity.animation(.easeOut(duration: 0.2)))
@@ -86,6 +98,9 @@ struct BlackMarketApp: App {
             }
             .sheet(isPresented: $showInfoSheet) {
                 AppInfoView()
+            }
+            .sheet(isPresented: $showMailSheet) {
+                MailboxView()
             }
             .onAppear {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -103,17 +118,18 @@ struct BlackMarketApp: App {
     }
 }
 
-// MARK: - 리퀴드 글래스(Liquid Glassmorphism) 컨트롤 바
+// MARK: - 하단 리퀴드 글래스 바
 struct LiquidGlassNavigationBar: View {
     let canGoBack: Bool
     let canGoForward: Bool
     let onBack: () -> Void
     let onForward: () -> Void
     let onReload: () -> Void
+    let onMail: () -> Void
     let onInfo: () -> Void
 
     var body: some View {
-        HStack(spacing: 28) {
+        HStack(spacing: 24) {
             Button(action: onBack) {
                 Image(systemName: "chevron.backward")
                     .font(.system(size: 16, weight: .bold))
@@ -129,11 +145,17 @@ struct LiquidGlassNavigationBar: View {
             .disabled(!canGoForward)
 
             Divider()
-                .frame(width: 1, height: 18)
+                .frame(width: 1, height: 16)
                 .background(Color.white.opacity(0.2))
 
             Button(action: onReload) {
                 Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.85))
+            }
+
+            Button(action: onMail) {
+                Image(systemName: "envelope.fill")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.white.opacity(0.85))
             }
@@ -144,15 +166,11 @@ struct LiquidGlassNavigationBar: View {
                     .foregroundColor(.white.opacity(0.85))
             }
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, 22)
         .padding(.vertical, 12)
-        // 리퀴드 글래스 효과 레이어링
         .background(
             ZStack {
-                // 울트라 씬 반투명 블러 백드롭
                 BlurView(style: .systemUltraThinMaterialDark)
-                
-                // 표면 반사광 그라디언트
                 LinearGradient(
                     gradient: Gradient(colors: [
                         Color.white.opacity(0.18),
@@ -165,7 +183,6 @@ struct LiquidGlassNavigationBar: View {
             }
         )
         .clipShape(Capsule())
-        // 미세 유리 테두리 (Rim Light)
         .overlay(
             Capsule()
                 .stroke(
@@ -182,76 +199,79 @@ struct LiquidGlassNavigationBar: View {
                     lineWidth: 0.8
                 )
         )
-        // 굴절 그림자
-        .shadow(color: Color.black.opacity(0.35), radius: 18, x: 0, y: 8)
+        .shadow(color: Color.black.opacity(0.4), radius: 18, x: 0, y: 8)
     }
 }
 
-// UIKit 초미세 블러 뷰
-struct BlurView: UIViewRepresentable {
-    let style: UIBlurEffect.Style
-
-    func makeUIView(context: Context) -> UIVisualEffectView {
-        UIVisualEffectView(effect: UIBlurEffect(style: style))
-    }
-
-    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
-        uiView.effect = UIBlurEffect(style: style)
-    }
-}
-
-// MARK: - 앱 정보 모달 화면 (리퀴드 다크 테마)
+// MARK: - 앱 정보 모달 (드래그 회전 방패)
 struct AppInfoView: View {
     @Environment(\.presentationMode) var presentationMode
+    @State private var dragRotationX: Double = 0
+    @State private var dragRotationY: Double = 0
 
-    var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
-    }
-    var buildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
-    }
+    var appVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0" }
+    var buildNumber: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1" }
 
     var body: some View {
         ZStack {
             Color(red: 0.05, green: 0.05, blue: 0.07).edgesIgnoringSafeArea(.all)
 
             VStack(spacing: 24) {
-                // 닫기 핸들
                 Capsule()
                     .fill(Color.white.opacity(0.25))
                     .frame(width: 36, height: 4)
                     .padding(.top, 12)
 
-                // 브랜드 심볼
-                VStack(spacing: 8) {
+                VStack(spacing: 12) {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
                             .fill(
                                 LinearGradient(
-                                    colors: [Color.white.opacity(0.12), Color.white.opacity(0.02)],
+                                    colors: [Color.white.opacity(0.15), Color.white.opacity(0.03)],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
                             )
-                            .frame(width: 72, height: 72)
+                            .frame(width: 80, height: 80)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                    .stroke(Color.white.opacity(0.35), lineWidth: 1)
                             )
+                            .shadow(color: Color.blue.opacity(0.2), radius: 15, x: 0, y: 5)
                         
                         Image(systemName: "shield.lefthalf.filled")
-                            .font(.system(size: 32))
+                            .font(.system(size: 38))
                             .foregroundColor(.white)
                     }
+                    .rotation3DEffect(.degrees(dragRotationX), axis: (x: 1.0, y: 0.0, z: 0.0))
+                    .rotation3DEffect(.degrees(dragRotationY), axis: (x: 0.0, y: 1.0, z: 0.0))
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                withAnimation(.interactiveSpring()) {
+                                    dragRotationY = Double(value.translation.width) * 0.8
+                                    dragRotationX = -Double(value.translation.height) * 0.8
+                                }
+                            }
+                            .onEnded { _ in
+                                withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
+                                    dragRotationX = 0
+                                    dragRotationY = 0
+                                }
+                            }
+                    )
 
                     Text("BLACK MARKET")
                         .font(.system(size: 18, weight: .bold, design: .monospaced))
                         .foregroundColor(.white)
                         .tracking(2)
-                }
-                .padding(.top, 8)
 
-                // 정보 글래스 카드
+                    Text("방패를 손가락으로 드래그하여 회전시켜보세요")
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray.opacity(0.8))
+                }
+                .padding(.top, 4)
+
                 VStack(spacing: 14) {
                     infoRow(title: "애플리케이션 버전", value: "v\(appVersion)")
                     Divider().background(Color.white.opacity(0.1))
@@ -259,7 +279,7 @@ struct AppInfoView: View {
                     Divider().background(Color.white.opacity(0.1))
                     infoRow(title: "연결 도메인", value: "web.black-market.store")
                     Divider().background(Color.white.opacity(0.1))
-                    infoRow(title: "생체인증 패스키", value: "활성화됨")
+                    infoRow(title: "생체인증 패스키", value: "비활성화됨")
                     Divider().background(Color.white.opacity(0.1))
                     infoRow(title: "보안 샌드박스", value: "TLS 1.3 암호화")
                 }
@@ -300,18 +320,185 @@ struct AppInfoView: View {
 
     func infoRow(title: String, value: String) -> some View {
         HStack {
-            Text(title)
-                .font(.system(size: 13))
-                .foregroundColor(.gray)
+            Text(title).font(.system(size: 13)).foregroundColor(.gray)
             Spacer()
-            Text(value)
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundColor(.white)
+            Text(value).font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .foregroundColor(value == "비활성화됨" ? Color.red.opacity(0.8) : .white)
         }
     }
 }
 
-// MARK: - 웹뷰 (네비게이션 액션 및 다운로드 처리)
+// MARK: - 우편함 모달
+struct MailboxView: View {
+    @Environment(\.presentationMode) var presentationMode
+    @State private var mails: [MailItem] = []
+    @State private var isFetching = true
+    @State private var copySuccess = false
+
+    var deviceId: String {
+        UIDevice.current.identifierForVendor?.uuidString ?? "UNKNOWN-DEVICE-ID"
+    }
+
+    // GitHub Pages 또는 웹 호스팅 inbox.json URL
+    let githubPagesMailURL = "https://doorbellchoonja.github.io/blackmarket-ios/mail/inbox.json"
+
+    var body: some View {
+        ZStack {
+            Color(red: 0.05, green: 0.05, blue: 0.07).edgesIgnoringSafeArea(.all)
+
+            VStack(spacing: 16) {
+                Capsule()
+                    .fill(Color.white.opacity(0.25))
+                    .frame(width: 36, height: 4)
+                    .padding(.top, 12)
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("우편함")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.white)
+                        Text("새로운 공지 및 개별 메시지를 확인합니다.")
+                            .font(.system(size: 12))
+                            .foregroundColor(.gray)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("내 기기 고유 식별번호")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.gray)
+                        Spacer()
+                        Button(action: {
+                            UIPasteboard.general.string = deviceId
+                            copySuccess = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copySuccess = false }
+                        }) {
+                            Text(copySuccess ? "복사됨!" : "번호 복사")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(copySuccess ? .green : .blue)
+                        }
+                    }
+                    Text(deviceId)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.8))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .padding(14)
+                .background(Color.white.opacity(0.04))
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
+                )
+                .padding(.horizontal, 20)
+
+                if isFetching {
+                    Spacer()
+                    ProgressView().colorScheme(.dark)
+                    Spacer()
+                } else if mails.isEmpty {
+                    Spacer()
+                    VStack(spacing: 8) {
+                        Image(systemName: "tray")
+                            .font(.system(size: 36))
+                            .foregroundColor(.gray.opacity(0.5))
+                        Text("받은 우편이 없습니다.")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                    }
+                    Spacer()
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(mails) { mail in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Text(mail.title)
+                                            .font(.system(size: 15, weight: .bold))
+                                            .foregroundColor(.white)
+                                        Spacer()
+                                        Text(mail.date)
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.gray)
+                                    }
+                                    Text(mail.content)
+                                        .font(.system(size: 13))
+                                        .foregroundColor(.white.opacity(0.85))
+                                        .lineSpacing(3)
+                                }
+                                .padding(16)
+                                .background(
+                                    ZStack {
+                                        BlurView(style: .systemThinMaterialDark)
+                                        Color.white.opacity(0.03)
+                                    }
+                                )
+                                .cornerRadius(14)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
+                                )
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                }
+
+                Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                    Text("닫기")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(14)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 0.8)
+                        )
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+            }
+        }
+        .onAppear { fetchMails() }
+    }
+
+    func fetchMails() {
+        // 캐싱 방지용 타임스탬프 쿼리 부착
+        guard let url = URL(string: "\(githubPagesMailURL)?t=\(Date().timeIntervalSince1970)") else {
+            self.isFetching = false
+            return
+        }
+
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            DispatchQueue.main.async {
+                self.isFetching = false
+                guard let data = data,
+                      let decoded = try? JSONDecoder().decode(MailResponse.self, from: data) else {
+                    return
+                }
+                let myMails = decoded.mails.filter {
+                    $0.target_device_id == "ALL" || $0.target_device_id == self.deviceId
+                }
+                self.mails = myMails
+            }
+        }.resume()
+    }
+}
+
+// MARK: - UIKit 블러 뷰
+struct BlurView: UIViewRepresentable {
+    let style: UIBlurEffect.Style
+    func makeUIView(context: Context) -> UIVisualEffectView { UIVisualEffectView(effect: UIBlurEffect(style: style)) }
+    func updateUIView(_ uiView: UIVisualEffectView, context: Context) { uiView.effect = UIBlurEffect(style: style) }
+}
+
+// MARK: - 웹뷰
 struct WebViewContainer: UIViewRepresentable {
     let url: URL
     @Binding var isLoading: Bool
@@ -351,7 +538,6 @@ struct WebViewContainer: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
-        // 하단 탭바 버튼 액션 수신 처리
         switch webAction {
         case .goBack:
             if uiView.canGoBack { uiView.goBack() }
@@ -379,23 +565,17 @@ struct WebViewContainer: UIViewRepresentable {
         func setupProgressObserver(for webView: WKWebView) {
             progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] webView, _ in
                 if webView.estimatedProgress >= 0.3 {
-                    DispatchQueue.main.async {
-                        self?.parent.isLoading = false
-                    }
+                    DispatchQueue.main.async { self?.parent.isLoading = false }
                 }
             }
         }
 
         func setupHistoryObserver(for webView: WKWebView) {
             backObservation = webView.observe(\.canGoBack, options: [.new]) { [weak self] webView, _ in
-                DispatchQueue.main.async {
-                    self?.parent.canGoBack = webView.canGoBack
-                }
+                DispatchQueue.main.async { self?.parent.canGoBack = webView.canGoBack }
             }
             forwardObservation = webView.observe(\.canGoForward, options: [.new]) { [weak self] webView, _ in
-                DispatchQueue.main.async {
-                    self?.parent.canGoForward = webView.canGoForward
-                }
+                DispatchQueue.main.async { self?.parent.canGoForward = webView.canGoForward }
             }
         }
 
@@ -480,7 +660,6 @@ struct WebViewContainer: UIViewRepresentable {
             let tempDir = FileManager.default.temporaryDirectory
             let destinationURL = tempDir.appendingPathComponent(suggestedFilename)
             try? FileManager.default.removeItem(at: destinationURL)
-            
             let downloadId = ObjectIdentifier(download)
             self.downloadedFileURLs[downloadId] = destinationURL
             completionHandler(destinationURL)
