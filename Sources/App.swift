@@ -83,7 +83,7 @@ struct WebViewContainer: UIViewRepresentable {
         config.allowsInlineMediaPlayback = true
         config.websiteDataStore = WKWebsiteDataStore.default()
 
-        // 팝업 허용 플래그 활성화
+        // 팝업 허용 플래그
         let preferences = WKPreferences()
         preferences.javaScriptCanOpenWindowsAutomatically = true
         config.preferences = preferences
@@ -108,6 +108,8 @@ struct WebViewContainer: UIViewRepresentable {
     class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
         var parent: WebViewContainer
         private var observation: NSKeyValueObservation?
+        // 다운로드된 파일의 로컬 임시 저장 경로 보관
+        private var downloadedFileURLs: [ObjectIdentifier: URL] = [:]
 
         init(_ parent: WebViewContainer) { self.parent = parent }
 
@@ -139,21 +141,13 @@ struct WebViewContainer: UIViewRepresentable {
 
         // MARK: - [1. 팝업 / target="_blank" 창 차단 해제]
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-            guard let targetURL = navigationAction.request.url else { return nil }
-
-            // 같은 도메인의 팝업인 경우 현재 웹뷰에서 바로 이동
-            if targetURL.host == "web.black-market.store" || targetURL.host == nil {
+            if navigationAction.targetFrame == nil {
                 webView.load(navigationAction.request)
-            } else {
-                // 결제창, 인증창, 외부 사이트 팝업인 경우 Safari 브라우저로 띄우거나 현재 창에서 오픈
-                if navigationAction.targetFrame == nil {
-                    webView.load(navigationAction.request)
-                }
             }
             return nil
         }
 
-        // MARK: - [2. 파일 다운로드 및 특수 스키마 처리]
+        // MARK: - [2. 파일 다운로드 및 외부 스키마 처리]
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             guard let reqURL = navigationAction.request.url else {
                 decisionHandler(.allow)
@@ -162,7 +156,7 @@ struct WebViewContainer: UIViewRepresentable {
 
             let scheme = reqURL.scheme?.lowercased() ?? ""
 
-            // 외부 앱 스키마(카카오페이, 토스, itms-services 등) 처리
+            // 외부 앱 스키마(카카오, 토스 등) 호출
             if scheme != "http" && scheme != "https" && scheme != "about" {
                 if UIApplication.shared.canOpenURL(reqURL) {
                     UIApplication.shared.open(reqURL, options: [:], completionHandler: nil)
@@ -183,7 +177,6 @@ struct WebViewContainer: UIViewRepresentable {
             decisionHandler(.allow)
         }
 
-        // 응답 헤더(Content-Disposition: attachment)로 내려오는 다운로드 감지
         func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
             if let response = navigationResponse.response as? HTTPURLResponse {
                 let disposition = response.allHeaderFields["Content-Disposition"] as? String ?? ""
@@ -197,7 +190,7 @@ struct WebViewContainer: UIViewRepresentable {
             decisionHandler(.allow)
         }
 
-        // MARK: - [3. iOS 네이티브 파일 저장 처리 (WKDownloadDelegate)]
+        // MARK: - [3. WKDownloadDelegate 구현 (오류 수정 지점)]
         @available(iOS 14.5, *)
         func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
             download.delegate = self
@@ -211,28 +204,38 @@ struct WebViewContainer: UIViewRepresentable {
         @available(iOS 14.5, *)
         func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
             let tempDir = FileManager.default.temporaryDirectory
-            let fileURL = tempDir.appendingPathComponent(suggestedFilename)
-            try? FileManager.default.removeItem(at: fileURL)
-            completionHandler(fileURL)
+            let destinationURL = tempDir.appendingPathComponent(suggestedFilename)
+            try? FileManager.default.removeItem(at: destinationURL)
+            
+            // 파일 다운로드 식별자별 저장 경로 매핑
+            let downloadId = ObjectIdentifier(download)
+            self.downloadedFileURLs[downloadId] = destinationURL
+            
+            completionHandler(destinationURL)
         }
 
         @available(iOS 14.5, *)
         func downloadDidFinish(_ download: WKDownload) {
-            // 다운로드 완료 시 iOS 파일 공유/저장 시트 표시
-            guard let fileURL = download.progress.userInfo[.fileURL] as? URL ?? getDownloadedFileURL(download) else { return }
-            
+            let downloadId = ObjectIdentifier(download)
+            guard let fileURL = self.downloadedFileURLs[downloadId] else { return }
+            self.downloadedFileURLs.removeValue(forKey: downloadId)
+
             DispatchQueue.main.async {
                 let activityVC = UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
-                if let rootVC = UIApplication.shared.windows.first?.rootViewController {
+                
+                // 최상위 UIViewController 안전하게 탐색
+                if let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+                   let rootVC = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController {
                     activityVC.popoverPresentationController?.sourceView = rootVC.view
                     rootVC.present(activityVC, animated: true)
                 }
             }
         }
 
-        private func getDownloadedFileURL(_ download: Any) -> URL? {
-            // 보조 경로 탐색
-            return nil
+        @available(iOS 14.5, *)
+        func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+            let downloadId = ObjectIdentifier(download)
+            self.downloadedFileURLs.removeValue(forKey: downloadId)
         }
     }
 }
