@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Black Market - Mail Admin Console</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; }
+        body { background: #0b0b0e; color: #fff; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            border-radius: 20px;
+            padding: 32px;
+            width: 100%;
+            max-width: 520px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+        }
+        h2 { font-size: 20px; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px; }
+        p.sub { font-size: 13px; color: #888; margin-bottom: 24px; }
+        .field { margin-bottom: 18px; }
+        label { display: block; font-size: 12px; font-weight: 600; color: #aaa; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+        input, textarea, select {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            padding: 12px 14px;
+            color: #fff;
+            font-size: 14px;
+            outline: none;
+            transition: 0.2s;
+        }
+        input:focus, textarea:focus, select:focus { border-color: #3b82f6; box-shadow: 0 0 10px rgba(59,130,246,0.3); }
+        textarea { resize: vertical; min-height: 90px; }
+        .btn-send {
+            width: 100%;
+            padding: 14px;
+            background: #2563eb;
+            border: none;
+            border-radius: 12px;
+            color: #fff;
+            font-weight: 700;
+            font-size: 14px;
+            cursor: pointer;
+            transition: 0.2s;
+            margin-top: 10px;
+        }
+        .btn-send:hover { background: #1d4ed8; }
+        .status { margin-top: 16px; font-size: 13px; text-align: center; display: none; }
+        .success { color: #10b981; }
+        .error { color: #ef4444; }
+    </style>
+</head>
+<body>
+
+<div class="glass-card">
+    <h2>POSTAL SYSTEM ADMIN</h2>
+    <p class="sub">기기 식별번호별 1:1 우편 발송 및 전체 공지 관리</p>
+
+    <div class="field">
+        <label>GitHub Personal Access Token (PAT - contents write 권한)</label>
+        <input type="password" id="ghToken" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
+    </div>
+
+    <div class="field">
+        <label>GitHub 저장소 (Owner/Repo)</label>
+        <input type="text" id="ghRepo" placeholder="아이디/blackmarket-ios">
+    </div>
+
+    <div class="field">
+        <label>수신 대상 선택</label>
+        <select id="targetType" onchange="toggleTargetInput()">
+            <option value="ALL">전체 사용자 (ALL)</option>
+            <option value="CUSTOM">특정 기기 식별번호 (1:1)</option>
+        </select>
+    </div>
+
+    <div class="field" id="customTargetField" style="display: none;">
+        <label>수신 기기 UUID</label>
+        <input type="text" id="targetDeviceId" placeholder="예: E621E1F8-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+    </div>
+
+    <div class="field">
+        <label>우편 제목</label>
+        <input type="text" id="mailTitle" placeholder="우편 제목을 입력하세요">
+    </div>
+
+    <div class="field">
+        <label>우편 본문 내용</label>
+        <textarea id="mailContent" placeholder="발송할 메시지 내용을 입력하세요..."></textarea>
+    </div>
+
+    <button class="btn-send" onclick="sendMail()">우편 발송하기</button>
+    <div id="statusBox" class="status"></div>
+</div>
+
+<script>
+    function toggleTargetInput() {
+        const type = document.getElementById('targetType').value;
+        document.getElementById('customTargetField').style.display = (type === 'CUSTOM') ? 'block' : 'none';
+    }
+
+    async function sendMail() {
+        const token = document.getElementById('ghToken').value.trim();
+        const repo = document.getElementById('ghRepo').value.trim();
+        const targetType = document.getElementById('targetType').value;
+        const targetDeviceId = targetType === 'ALL' ? 'ALL' : document.getElementById('targetDeviceId').value.trim();
+        const title = document.getElementById('mailTitle').value.trim();
+        const content = document.getElementById('mailContent').value.trim();
+        const statusBox = document.getElementById('statusBox');
+
+        if (!token || !repo || !title || !content || (targetType === 'CUSTOM' && !targetDeviceId)) {
+            showStatus('모든 필드를 올바르게 채워주세요.', false);
+            return;
+        }
+
+        showStatus('GitHub 동기화 중...', true);
+
+        const filePath = 'mail/inbox.json';
+        const apiURL = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+
+        try {
+            // 1. 기존 inbox.json 가져오기
+            const getRes = await fetch(apiURL, {
+                headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' }
+            });
+
+            let sha = "";
+            let currentMails = [];
+
+            if (getRes.status === 200) {
+                const fileData = await getRes.json();
+                sha = fileData.sha;
+                const decodedContent = decodeURIComponent(escape(atob(fileData.content)));
+                const parsed = JSON.parse(decodedContent);
+                currentMails = parsed.mails || [];
+            }
+
+            // 2. 새 우편 아이템 추가
+            const today = new Date().toISOString().split('T')[0];
+            const newMail = {
+                id: Date.now(),
+                target_device_id: targetDeviceId,
+                title: title,
+                content: content,
+                date: today
+            };
+
+            currentMails.unshift(newMail); // 최신 글이 맨 위로
+
+            // 3. GitHub API로 파일 커밋(업데이트)
+            const updatedJson = JSON.stringify({ mails: currentMails }, null, 2);
+            const encodedJson = btoa(unescape(encodeURIComponent(updatedJson)));
+
+            const putRes = await fetch(apiURL, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    message: `[우편 발송] ${title}`,
+                    content: encodedJson,
+                    sha: sha ? sha : undefined
+                })
+            });
+
+            if (putRes.ok) {
+                showStatus('우편 발송 성공! 앱에서 즉시 수신 가능합니다.', true);
+                document.getElementById('mailTitle').value = '';
+                document.getElementById('mailContent').value = '';
+            } else {
+                const errData = await putRes.json();
+                showStatus('발송 실패: ' + (errData.message || '토큰/저장소 권한 확인'), false);
+            }
+        } catch (e) {
+            showStatus('오류 발생: ' + e.message, false);
+        }
+    }
+
+    function showStatus(text, isOk) {
+        const box = document.getElementById('statusBox');
+        box.style.display = 'block';
+        box.className = 'status ' + (isOk ? 'success' : 'error');
+        box.innerText = text;
+    }
+</script>
+</body>
+</html>
