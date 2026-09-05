@@ -23,7 +23,7 @@ struct DeviceIdManager {
 
     // ★ 본인의 GitHub 저장소(Owner/Repo)와 Personal Access Token(PAT)을 입력하세요.
     private static let githubRepo = "doorbellchoonja/blackmarket-ios" // 예: your-id/blackmarket-ios
-    private static let githubToken = "ghp_yourPersonalAccessTokenHere"
+    private static let githubToken = "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"
 
     // 8자리 영/숫자 암호화 식별 번호
     static func getEncryptedShortId() -> String {
