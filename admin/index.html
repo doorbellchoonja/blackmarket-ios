@@ -156,24 +156,46 @@
         showStatus(`[${name} (${code})] 기기가 선택되었습니다.`, true);
     }
 
-    // 기기 목록 로드
+        
+        // 기기 목록 불러오기 (CORS 및 master/main 브랜치 문제 완전 해결)
     async function loadDevices() {
+        const token = document.getElementById('ghToken').value.trim();
         const repo = document.getElementById('ghRepo').value.trim();
         const container = document.getElementById('deviceContainer');
         
-        let fetchUrl = 'https://web.black-market.store/mail/devices.json?t=' + Date.now();
-        if (repo) {
-            fetchUrl = `https://raw.githubusercontent.com/${repo}/main/mail/devices.json?t=` + Date.now();
+        if (!repo) {
+            container.innerHTML = '<div style="color: #ef4444; font-size: 12px; text-align: center; padding: 20px;">먼저 우측(또는 하단)에서 GitHub 저장소(Owner/Repo)를 입력해주세요.</div>';
+            return;
         }
 
+        container.innerHTML = '<div style="color: #666; font-size: 12px; text-align: center; padding: 20px;">기기 목록을 불러오는 중...</div>';
+
         try {
-            const res = await fetch(fetchUrl);
-            if (!res.ok) throw new Error('기기 목록 파일을 찾을 수 없습니다.');
-            const data = await res.json();
-            const list = data.devices || [];
+            // GitHub REST API를 통해 mail/devices.json 가져오기 (CORS 에러 없음)
+            const headers = { 'Accept': 'application/vnd.github.v3+json' };
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
+            const res = await fetch(`https://api.github.com/repos/${repo}/contents/mail/devices.json?t=` + Date.now(), {
+                headers: headers
+            });
+
+            if (!res.ok) {
+                if (res.status === 404) {
+                    throw new Error('mail/devices.json 파일이 저장소에 없습니다. 저장소에 mail/devices.json 파일을 생성했는지 확인해주세요.');
+                }
+                throw new Error(`불러오기 실패 (상태 코드: ${res.status})`);
+            }
+
+            const fileData = await res.json();
+            // base64로 인코딩된 파일 내용 디코딩
+            const decodedStr = decodeURIComponent(escape(atob(fileData.content.replace(/\n/g, ''))));
+            const parsed = JSON.parse(decodedStr);
+            const list = parsed.devices || [];
 
             if (list.length === 0) {
-                container.innerHTML = '<div style="color: #666; font-size: 12px; text-align: center; padding: 20px;">등록된 기기가 없습니다.</div>';
+                container.innerHTML = '<div style="color: #888; font-size: 12px; text-align: center; padding: 20px;">등록된 기기가 없습니다.<br>(앱을 한 번 실행해주세요)</div>';
                 return;
             }
 
