@@ -2,8 +2,9 @@ import SwiftUI
 import WebKit
 import UserNotifications
 import AuthenticationServices
+import CryptoKit
 
-// MARK: - 우편(메일) 모델
+// MARK: - 우편 모델
 struct MailItem: Identifiable, Codable {
     let id: Int
     let target_device_id: String
@@ -14,6 +15,61 @@ struct MailItem: Identifiable, Codable {
 
 struct MailResponse: Codable {
     let mails: [MailItem]
+}
+
+// MARK: - 기기 모델명 & 고유 8자리 암호화 관리자
+struct DeviceIdManager {
+    private static let salt = "BM_DEVICE_SALT_2026"
+
+    static func getEncryptedShortId() -> String {
+        let rawUUID = UIDevice.current.identifierForVendor?.uuidString ?? "FALLBACK-DEVICE"
+        let salted = rawUUID + salt
+        let digest = SHA256.hash(data: Data(salted.utf8))
+        let hexString = digest.map { String(format: "%02X", $0) }.joined()
+        return String(hexString.prefix(8))
+    }
+
+    // 아이폰 모델명 식별 (iPhone 13, iPhone 15 Pro 등)
+    static func getDeviceModelName() -> String {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        let machineMirror = Mirror(reflecting: systemInfo.machine)
+        let identifier = machineMirror.children.reduce("") { identifier, element in
+            guard let value = element.value as? Int8, value != 0 else { return identifier }
+            return identifier + String(UnicodeScalar(UInt8(value)))
+        }
+
+        switch identifier {
+        case "iPhone14,2": return "iPhone 13 Pro"
+        case "iPhone14,3": return "iPhone 13 Pro Max"
+        case "iPhone14,4": return "iPhone 13 mini"
+        case "iPhone14,5": return "iPhone 13"
+        case "iPhone14,7": return "iPhone 14"
+        case "iPhone14,8": return "iPhone 14 Plus"
+        case "iPhone15,2": return "iPhone 14 Pro"
+        case "iPhone15,3": return "iPhone 14 Pro Max"
+        case "iPhone15,4": return "iPhone 15"
+        case "iPhone15,5": return "iPhone 15 Plus"
+        case "iPhone16,1": return "iPhone 15 Pro"
+        case "iPhone16,2": return "iPhone 15 Pro Max"
+        default: return UIDevice.current.model
+        }
+    }
+
+    // 서버로 기기 정보 자동 동기화 (최초 1회 실행)
+    static func syncDeviceToServer() {
+        guard let url = URL(string: "https://web.black-market.store/api/mail/register-device") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: String] = [
+            "device_id": getEncryptedShortId(),
+            "device_name": getDeviceModelName()
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        URLSession.shared.dataTask(with: req).resume()
+    }
 }
 
 // MARK: - AppDelegate
@@ -29,6 +85,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 }
             }
         }
+        // 기기 등록 동기화 실행
+        DeviceIdManager.syncDeviceToServer()
         return true
     }
 
@@ -76,7 +134,6 @@ struct BlackMarketApp: App {
                     }
                     .edgesIgnoringSafeArea(.all)
 
-                    // 하단 리퀴드 글래스 컨트롤 바
                     LiquidGlassNavigationBar(
                         canGoBack: canGoBack,
                         canGoForward: canGoForward,
@@ -277,7 +334,7 @@ struct AppInfoView: View {
                     Divider().background(Color.white.opacity(0.1))
                     infoRow(title: "빌드 번호", value: "Build #\(buildNumber)")
                     Divider().background(Color.white.opacity(0.1))
-                    infoRow(title: "연결 도메인", value: "web.black-market.store")
+                    infoRow(title: "기기 식별 모델", value: DeviceIdManager.getDeviceModelName())
                     Divider().background(Color.white.opacity(0.1))
                     infoRow(title: "생체인증 패스키", value: "비활성화됨")
                     Divider().background(Color.white.opacity(0.1))
@@ -335,12 +392,9 @@ struct MailboxView: View {
     @State private var isFetching = true
     @State private var copySuccess = false
 
-    var deviceId: String {
-        UIDevice.current.identifierForVendor?.uuidString ?? "UNKNOWN-DEVICE-ID"
-    }
-
-    // GitHub Pages 또는 웹 호스팅 inbox.json URL
-    let githubPagesMailURL = "https://doorbellchoonja.github.io/blackmarket-ios/mail/inbox.json"
+    var shortDeviceId: String { DeviceIdManager.getEncryptedShortId() }
+    var deviceModelName: String { DeviceIdManager.getDeviceModelName() }
+    let githubPagesMailURL = "https://web.black-market.store/mail/inbox.json"
 
     var body: some View {
         ZStack {
@@ -367,12 +421,12 @@ struct MailboxView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("내 기기 고유 식별번호")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.gray)
+                        Text(deviceModelName)
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.blue)
                         Spacer()
                         Button(action: {
-                            UIPasteboard.general.string = deviceId
+                            UIPasteboard.general.string = shortDeviceId
                             copySuccess = true
                             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copySuccess = false }
                         }) {
@@ -381,11 +435,10 @@ struct MailboxView: View {
                                 .foregroundColor(copySuccess ? .green : .blue)
                         }
                     }
-                    Text(deviceId)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.8))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    Text(shortDeviceId)
+                        .font(.system(size: 17, weight: .black, design: .monospaced))
+                        .foregroundColor(.white)
+                        .tracking(3)
                 }
                 .padding(14)
                 .background(Color.white.opacity(0.04))
@@ -469,7 +522,6 @@ struct MailboxView: View {
     }
 
     func fetchMails() {
-        // 캐싱 방지용 타임스탬프 쿼리 부착
         guard let url = URL(string: "\(githubPagesMailURL)?t=\(Date().timeIntervalSince1970)") else {
             self.isFetching = false
             return
@@ -483,7 +535,7 @@ struct MailboxView: View {
                     return
                 }
                 let myMails = decoded.mails.filter {
-                    $0.target_device_id == "ALL" || $0.target_device_id == self.deviceId
+                    $0.target_device_id == "ALL" || $0.target_device_id.uppercased() == self.shortDeviceId
                 }
                 self.mails = myMails
             }
