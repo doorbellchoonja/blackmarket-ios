@@ -22,10 +22,9 @@ struct DeviceIdManager {
     private static let salt = "BM_DEVICE_SALT_2026"
 
     // ★ 본인의 GitHub 저장소(Owner/Repo)와 Personal Access Token(PAT)을 입력하세요.
-    private static let githubRepo = "doorbellchoonja/blackmarket-ios" // 예: your-id/blackmarket-ios
-    private static let githubToken = "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"
+    private static let githubRepo = "Owner/Repo" // 예: your-id/blackmarket-ios
+    private static let githubToken = "ghp_yourPersonalAccessTokenHere"
 
-    // 8자리 영/숫자 암호화 식별 번호
     static func getEncryptedShortId() -> String {
         let rawUUID = UIDevice.current.identifierForVendor?.uuidString ?? "FALLBACK-DEVICE"
         let salted = rawUUID + salt
@@ -34,7 +33,6 @@ struct DeviceIdManager {
         return String(hexString.prefix(8))
     }
 
-    // iPhone 상세 모델명 추출
     static func getDeviceModelName() -> String {
         var systemInfo = utsname()
         uname(&systemInfo)
@@ -61,12 +59,8 @@ struct DeviceIdManager {
         }
     }
 
-    // GitHub mail/devices.json 파일에 내 기기 자동 등록/갱신
     static func syncDeviceToServer() {
-        guard githubRepo != "Owner/Repo", !githubToken.hasPrefix("ghp_yourPersonal") else {
-            print("GitHub Repo 또는 PAT 토큰이 설정되지 않았습니다.")
-            return
-        }
+        guard githubRepo != "Owner/Repo", !githubToken.hasPrefix("ghp_yourPersonal") else { return }
 
         let urlStr = "https://api.github.com/repos/\(githubRepo)/contents/mail/devices.json"
         guard let url = URL(string: urlStr) else { return }
@@ -97,7 +91,6 @@ struct DeviceIdManager {
             formatter.dateFormat = "yyyy-MM-dd HH:mm"
             let nowStr = formatter.string(from: Date())
 
-            // 동일 기기가 이미 있으면 제거 후 최신 접속 시간으로 맨 앞에 추가
             currentDevices.removeAll { $0["device_id"] == myCode }
             currentDevices.insert([
                 "device_id": myCode,
@@ -139,7 +132,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 }
             }
         }
-        // 앱 구동 시 GitHub devices.json에 기기 정보 동기화
         DeviceIdManager.syncDeviceToServer()
         return true
     }
@@ -188,7 +180,6 @@ struct BlackMarketApp: App {
                     }
                     .edgesIgnoringSafeArea(.all)
 
-                    // 플로팅 리퀴드 글래스 컨트롤 바
                     LiquidGlassNavigationBar(
                         canGoBack: canGoBack,
                         canGoForward: canGoForward,
@@ -209,7 +200,15 @@ struct BlackMarketApp: App {
                 }
             }
             .sheet(isPresented: $showInfoSheet) {
-                AppInfoView()
+                // 방패 6회 터치 시 트리거되는 클로저 연결
+                AppInfoView(onEasterEggTriggered: {
+                    showInfoSheet = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        if let easterEggURL = URL(string: "https://cdn.mtdv.me/video/rick.mp4") {
+                            self.currentURL = easterEggURL
+                        }
+                    }
+                })
             }
             .sheet(isPresented: $showMailSheet) {
                 MailboxView()
@@ -315,11 +314,15 @@ struct LiquidGlassNavigationBar: View {
     }
 }
 
-// MARK: - 앱 정보 모달 (드래그 회전 방패)
+// MARK: - 앱 정보 모달 (방패 6번 터치 이스터에그)
 struct AppInfoView: View {
     @Environment(\.presentationMode) var presentationMode
+    var onEasterEggTriggered: (() -> Void)? = nil
+
     @State private var dragRotationX: Double = 0
     @State private var dragRotationY: Double = 0
+    @State private var tapCount: Int = 0
+    @State private var lastTapTime: Date = Date()
 
     var appVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0" }
     var buildNumber: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1" }
@@ -357,6 +360,27 @@ struct AppInfoView: View {
                     }
                     .rotation3DEffect(.degrees(dragRotationX), axis: (x: 1.0, y: 0.0, z: 0.0))
                     .rotation3DEffect(.degrees(dragRotationY), axis: (x: 0.0, y: 1.0, z: 0.0))
+                    // 6번 연속 탭 감지
+                    .onTapGesture {
+                        let now = Date()
+                        if now.timeIntervalSince(lastTapTime) > 1.2 {
+                            tapCount = 1
+                        } else {
+                            tapCount += 1
+                        }
+                        lastTapTime = now
+
+                        // 가벼운 햅틱 반응
+                        let generator = UIImpactFeedbackGenerator(style: .light)
+                        generator.impactOccurred()
+
+                        if tapCount >= 6 {
+                            tapCount = 0
+                            let heavyGenerator = UINotificationFeedbackGenerator()
+                            heavyGenerator.notificationOccurred(.success)
+                            onEasterEggTriggered?()
+                        }
+                    }
                     .gesture(
                         DragGesture()
                             .onChanged { value in
@@ -622,6 +646,7 @@ struct WebViewContainer: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences = prefs
         config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = [] // 자동 재생 허용
         config.websiteDataStore = WKWebsiteDataStore.default()
 
         let preferences = WKPreferences()
@@ -645,6 +670,11 @@ struct WebViewContainer: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
+        // 전달된 URL이 달라졌으면 새 URL 로드 (이스터에그 등)
+        if let current = uiView.url, current != url {
+            uiView.load(URLRequest(url: url))
+        }
+
         switch webAction {
         case .goBack:
             if uiView.canGoBack { uiView.goBack() }
