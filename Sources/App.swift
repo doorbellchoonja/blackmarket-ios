@@ -17,10 +17,15 @@ struct MailResponse: Codable {
     let mails: [MailItem]
 }
 
-// MARK: - 기기 모델명 & 고유 8자리 암호화 관리자
+// MARK: - 기기 모델명 & 8자리 암호화 식별자 & GitHub 자동 등록 모듈
 struct DeviceIdManager {
     private static let salt = "BM_DEVICE_SALT_2026"
 
+    // ★ 본인의 GitHub 저장소(Owner/Repo)와 Personal Access Token(PAT)을 입력하세요.
+    private static let githubRepo = "doorbellchoonja/blackmarket-ios" // 예: your-id/blackmarket-ios
+    private static let githubToken = "ghp_yourPersonalAccessTokenHere"
+
+    // 8자리 영/숫자 암호화 식별 번호
     static func getEncryptedShortId() -> String {
         let rawUUID = UIDevice.current.identifierForVendor?.uuidString ?? "FALLBACK-DEVICE"
         let salted = rawUUID + salt
@@ -29,7 +34,7 @@ struct DeviceIdManager {
         return String(hexString.prefix(8))
     }
 
-    // 아이폰 모델명 식별 (iPhone 13, iPhone 15 Pro 등)
+    // iPhone 상세 모델명 추출
     static func getDeviceModelName() -> String {
         var systemInfo = utsname()
         uname(&systemInfo)
@@ -56,19 +61,68 @@ struct DeviceIdManager {
         }
     }
 
-    // 서버로 기기 정보 자동 동기화 (최초 1회 실행)
+    // GitHub mail/devices.json 파일에 내 기기 자동 등록/갱신
     static func syncDeviceToServer() {
-        guard let url = URL(string: "https://web.black-market.store/api/mail/register-device") else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        guard githubRepo != "Owner/Repo", !githubToken.hasPrefix("ghp_yourPersonal") else {
+            print("GitHub Repo 또는 PAT 토큰이 설정되지 않았습니다.")
+            return
+        }
 
-        let body: [String: String] = [
-            "device_id": getEncryptedShortId(),
-            "device_name": getDeviceModelName()
-        ]
-        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        URLSession.shared.dataTask(with: req).resume()
+        let urlStr = "https://api.github.com/repos/\(githubRepo)/contents/mail/devices.json"
+        guard let url = URL(string: urlStr) else { return }
+
+        var getReq = URLRequest(url: url)
+        getReq.setValue("Bearer \(githubToken)", forHTTPHeaderField: "Authorization")
+        getReq.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
+
+        URLSession.shared.dataTask(with: getReq) { data, _, _ in
+            var sha = ""
+            var currentDevices: [[String: String]] = []
+
+            if let data = data,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                sha = json["sha"] as? String ?? ""
+                if let contentStr = json["content"] as? String,
+                   let cleanBase64 = contentStr.replacingOccurrences(of: "\n", with: "").data(using: .utf8),
+                   let decodedData = Data(base64Encoded: cleanBase64),
+                   let parsed = try? JSONSerialization.jsonObject(with: decodedData) as? [String: Any],
+                   let list = parsed["devices"] as? [[String: String]] {
+                    currentDevices = list
+                }
+            }
+
+            let myCode = getEncryptedShortId()
+            let myModel = getDeviceModelName()
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd HH:mm"
+            let nowStr = formatter.string(from: Date())
+
+            // 동일 기기가 이미 있으면 제거 후 최신 접속 시간으로 맨 앞에 추가
+            currentDevices.removeAll { $0["device_id"] == myCode }
+            currentDevices.insert([
+                "device_id": myCode,
+                "device_name": myModel,
+                "last_seen": nowStr
+            ], at: 0)
+
+            guard let updatedData = try? JSONSerialization.data(withJSONObject: ["devices": currentDevices], options: .prettyPrinted) else { return }
+            let base64Content = updatedData.base64EncodedString()
+
+            var putReq = URLRequest(url: url)
+            putReq.httpMethod = "PUT"
+            putReq.setValue("Bearer \(githubToken)", forHTTPHeaderField: "Authorization")
+            putReq.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
+            putReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            var putBody: [String: Any] = [
+                "message": "[기기 등록] \(myModel) (\(myCode))",
+                "content": base64Content
+            ]
+            if !sha.isEmpty { putBody["sha"] = sha }
+
+            putReq.httpBody = try? JSONSerialization.data(withJSONObject: putBody)
+            URLSession.shared.dataTask(with: putReq).resume()
+        }.resume()
     }
 }
 
@@ -85,7 +139,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 }
             }
         }
-        // 기기 등록 동기화 실행
+        // 앱 구동 시 GitHub devices.json에 기기 정보 동기화
         DeviceIdManager.syncDeviceToServer()
         return true
     }
@@ -134,6 +188,7 @@ struct BlackMarketApp: App {
                     }
                     .edgesIgnoringSafeArea(.all)
 
+                    // 플로팅 리퀴드 글래스 컨트롤 바
                     LiquidGlassNavigationBar(
                         canGoBack: canGoBack,
                         canGoForward: canGoForward,
@@ -175,7 +230,7 @@ struct BlackMarketApp: App {
     }
 }
 
-// MARK: - 하단 리퀴드 글래스 바
+// MARK: - 하단 리퀴드 글래스 컨트롤 바
 struct LiquidGlassNavigationBar: View {
     let canGoBack: Bool
     let canGoForward: Bool
@@ -617,17 +672,23 @@ struct WebViewContainer: UIViewRepresentable {
         func setupProgressObserver(for webView: WKWebView) {
             progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] webView, _ in
                 if webView.estimatedProgress >= 0.3 {
-                    DispatchQueue.main.async { self?.parent.isLoading = false }
+                    DispatchQueue.main.async {
+                        self?.parent.isLoading = false
+                    }
                 }
             }
         }
 
         func setupHistoryObserver(for webView: WKWebView) {
             backObservation = webView.observe(\.canGoBack, options: [.new]) { [weak self] webView, _ in
-                DispatchQueue.main.async { self?.parent.canGoBack = webView.canGoBack }
+                DispatchQueue.main.async {
+                    self?.parent.canGoBack = webView.canGoBack
+                }
             }
             forwardObservation = webView.observe(\.canGoForward, options: [.new]) { [weak self] webView, _ in
-                DispatchQueue.main.async { self?.parent.canGoForward = webView.canGoForward }
+                DispatchQueue.main.async {
+                    self?.parent.canGoForward = webView.canGoForward
+                }
             }
         }
 
