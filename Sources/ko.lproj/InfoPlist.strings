@@ -1,0 +1,5 @@
+CFBundleDisplayName = "블랙마켓";
+CFBundleName = "블랙마켓";
+NSFaceIDUsageDescription = "Black Market 패스키 로그인 및 본인 인증을 위해 생체 인식이 필요합니다.";
+NSPhotoLibraryAdditionsUsageDescription = "우편함의 사진 및 동영상을 사진 앱에 저장하기 위해 권한이 필요합니다.";
+NSPhotoLibraryUsageDescription = "우편함 미디어를 사진 앱에 저장하기 위해 접근 권한이 필요합니다.";
