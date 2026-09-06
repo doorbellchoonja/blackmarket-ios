@@ -13,14 +13,13 @@ struct MailItem: Identifiable, Codable {
     let date: String
 }
 
-struct MailResponse: Codable {
-    let mails: [MailItem]
-}
-
-// MARK: - 기기 식별자 & GitHub Actions 트리거 모듈
+// MARK: - 기기 식별자 & Supabase 연동 모듈
 struct DeviceIdManager {
     private static let salt = "BM_DEVICE_SALT_2026"
-    private static let githubRepo = "doorbellchoonja/blackmarket-ios"
+
+    // ★ 본인의 Supabase Project URL 및 anon/public Key를 입력하세요
+    static let supabaseUrl = "https://xirtaynusdyvtntlodpz.supabase.co/rest/v1/"
+    static let supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhpcnRheW51c2R5dnRudGxvZHB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2MTQ5NTUsImV4cCI6MjEwNDE5MDk1NX0.RCiocVn7PZQnWHnyN8tGQ08AV5M5ZbvvIKB6-eQRseI"
 
     static func getEncryptedShortId() -> String {
         let rawUUID = UIDevice.current.identifierForVendor?.uuidString ?? "FALLBACK-DEVICE"
@@ -56,21 +55,26 @@ struct DeviceIdManager {
         }
     }
 
-    // GitHub Actions repository_dispatch 트리거
-    static func syncDeviceToActions() {
-        guard let url = URL(string: "https://api.github.com/repos/\(githubRepo)/dispatches") else { return }
+    // Supabase PostgREST API로 기기 자동 등록 (Upsert)
+    static func syncDeviceToServer() {
+        guard let url = URL(string: "\(supabaseUrl)/rest/v1/devices") else { return }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        let nowStr = formatter.string(from: Date())
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        // 이미 존재하는 기기 식별자일 경우 업데이트 처리 (Upsert)
+        req.setValue("resolution=merge-duplicates", forHTTPHeaderField: "Prefer")
 
-        let body: [String: Any] = [
-            "event_type": "register_device",
-            "client_payload": [
-                "device_id": getEncryptedShortId(),
-                "device_name": getDeviceModelName()
-            ]
+        let body: [String: String] = [
+            "device_id": getEncryptedShortId(),
+            "device_name": getDeviceModelName(),
+            "last_seen": nowStr
         ]
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
         URLSession.shared.dataTask(with: req).resume()
@@ -90,8 +94,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 }
             }
         }
-        // 앱 실행 시 GitHub Actions 러너 가동
-        DeviceIdManager.syncDeviceToActions()
+        DeviceIdManager.syncDeviceToServer()
         return true
     }
 
@@ -420,7 +423,7 @@ struct AppInfoView: View {
     }
 }
 
-// MARK: - 우편함 모달
+// MARK: - 우편함 모달 (Supabase REST 조회)
 struct MailboxView: View {
     @Environment(\.presentationMode) var presentationMode
     @State private var mails: [MailItem] = []
@@ -429,7 +432,6 @@ struct MailboxView: View {
 
     var shortDeviceId: String { DeviceIdManager.getEncryptedShortId() }
     var deviceModelName: String { DeviceIdManager.getDeviceModelName() }
-    let rawInboxURL = "https://raw.githubusercontent.com/doorbellchoonja/blackmarket-ios/main/mail/inbox.json"
 
     var body: some View {
         ZStack {
@@ -556,23 +558,27 @@ struct MailboxView: View {
         .onAppear { fetchMails() }
     }
 
+    // Supabase REST API로 우편 목록 조회
     func fetchMails() {
-        guard let url = URL(string: "\(rawInboxURL)?t=\(Date().timeIntervalSince1970)") else {
+        // target_device_id가 ALL이거나 내 기기 식별번호인 항목만 쿼리
+        let queryUrlStr = "\(DeviceIdManager.supabaseUrl)/rest/v1/inbox?select=*&order=id.desc&or=(target_device_id.eq.ALL,target_device_id.eq.\(shortDeviceId))"
+        guard let url = URL(string: queryUrlStr) else {
             self.isFetching = false
             return
         }
 
-        URLSession.shared.dataTask(with: url) { data, _, _ in
+        var req = URLRequest(url: url)
+        req.setValue(DeviceIdManager.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(DeviceIdManager.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+
+        URLSession.shared.dataTask(with: req) { data, _, _ in
             DispatchQueue.main.async {
                 self.isFetching = false
                 guard let data = data,
-                      let decoded = try? JSONDecoder().decode(MailResponse.self, from: data) else {
+                      let decoded = try? JSONDecoder().decode([MailItem].self, from: data) else {
                     return
                 }
-                let myMails = decoded.mails.filter {
-                    $0.target_device_id == "ALL" || $0.target_device_id.uppercased() == self.shortDeviceId
-                }
-                self.mails = myMails
+                self.mails = decoded
             }
         }.resume()
     }
