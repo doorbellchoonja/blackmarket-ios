@@ -17,8 +17,8 @@ struct MailItem: Identifiable, Codable {
 struct DeviceIdManager {
     private static let salt = "BM_DEVICE_SALT_2026"
 
-    // ★ 본인의 Supabase Project URL 및 anon/public Key를 입력하세요
-    static let supabaseUrl = "https://xirtaynusdyvtntlodpz.supabase.co/rest/v1"
+    // 순수 프로젝트 Base URL 적용 (/rest/v1 중복 제거)
+    static let supabaseUrl = "https://xirtaynusdyvtntlodpz.supabase.co"
     static let supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhpcnRheW51c2R5dnRudGxvZHB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2MTQ5NTUsImV4cCI6MjEwNDE5MDk1NX0.RCiocVn7PZQnWHnyN8tGQ08AV5M5ZbvvIKB6-eQRseI"
 
     static func getEncryptedShortId() -> String {
@@ -68,7 +68,7 @@ struct DeviceIdManager {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
         req.setValue("Bearer \(supabaseAnonKey)", forHTTPHeaderField: "Authorization")
-        // 이미 존재하는 기기 식별자일 경우 업데이트 처리 (Upsert)
+        // 기존 기기 식별자 존재 시 자동 병합 (Upsert)
         req.setValue("resolution=merge-duplicates", forHTTPHeaderField: "Prefer")
 
         let body: [String: String] = [
@@ -560,7 +560,6 @@ struct MailboxView: View {
 
     // Supabase REST API로 우편 목록 조회
     func fetchMails() {
-        // target_device_id가 ALL이거나 내 기기 식별번호인 항목만 쿼리
         let queryUrlStr = "\(DeviceIdManager.supabaseUrl)/rest/v1/inbox?select=*&order=id.desc&or=(target_device_id.eq.ALL,target_device_id.eq.\(shortDeviceId))"
         guard let url = URL(string: queryUrlStr) else {
             self.isFetching = false
