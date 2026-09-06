@@ -153,10 +153,10 @@
         </div>
 
         <div class="field">
-            <label>사진 직접 첨부 (Supabase Storage)</label>
+            <label>미디어 직접 첨부 (사진 및 동영상)</label>
             <div class="upload-row">
-                <input type="file" id="imageInput" accept="image/*" style="display:none" onchange="handleImageUpload()">
-                <label for="imageInput" class="file-label">🖼️ 사진 파일 선택 및 업로드</label>
+                <input type="file" id="mediaInput" accept="image/*,video/*" style="display:none" onchange="handleMediaUpload()">
+                <label for="mediaInput" class="file-label">📁 사진 / 영상 파일 선택 및 업로드</label>
                 <span id="uploadStatus" class="upload-status"></span>
             </div>
         </div>
@@ -247,15 +247,15 @@
         }
     }
 
-    // Supabase Storage로 직접 이미지 업로드
-    async function handleImageUpload() {
-        const fileInput = document.getElementById('imageInput');
+    // 사진 또는 동영상 Supabase Storage 업로드
+    async function handleMediaUpload() {
+        const fileInput = document.getElementById('mediaInput');
         const statusSpan = document.getElementById('uploadStatus');
         const file = fileInput.files[0];
         if (!file) return;
 
         statusSpan.style.color = '#60a5fa';
-        statusSpan.innerText = '업로드 중...';
+        statusSpan.innerText = '업로드 진행 중...';
 
         const fileExt = file.name.split('.').pop();
         const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
@@ -267,7 +267,7 @@
             if (error) {
                 console.error(error);
                 statusSpan.style.color = '#ef4444';
-                statusSpan.innerText = '실패: mail-images 버킷이 Public 상태인지 확인하세요.';
+                statusSpan.innerText = '실패: RLS 정책(SQL) 등록 여부를 확인하세요.';
                 return;
             }
 
