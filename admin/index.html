@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Black Market - Mail & Device Admin (Supabase)</title>
-    <!-- Supabase JS 라이브러리 로드 -->
+    <!-- Supabase JS 라이브러리 -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; }
         body { background: #08080a; color: #fff; min-height: 100vh; padding: 30px 20px; display: flex; justify-content: center; }
-        .container { width: 100%; max-width: 960px; display: grid; grid-template-columns: 1.1fr 1fr; gap: 24px; }
-        @media (max-width: 840px) { .container { grid-template-columns: 1fr; } }
-        
+        .container { width: 100%; max-width: 1000px; display: grid; grid-template-columns: 1.15fr 1fr; gap: 24px; }
+        @media (max-width: 860px) { .container { grid-template-columns: 1fr; } }
+        
         .glass-card {
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -23,7 +23,7 @@
             height: fit-content;
         }
         h2 { font-size: 18px; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px; }
-        p.sub { font-size: 12px; color: #777; margin-bottom: 20px; }
+        p.sub { font-size: 12px; color: #777; margin-bottom: 16px; }
         .field { margin-bottom: 16px; }
         label { display: block; font-size: 11px; font-weight: 600; color: #999; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
         input, textarea, select {
@@ -38,8 +38,8 @@
             transition: 0.2s;
         }
         input:focus, textarea:focus, select:focus { border-color: #3b82f6; box-shadow: 0 0 10px rgba(59,130,246,0.3); }
-        textarea { resize: vertical; min-height: 80px; }
-        
+        textarea { resize: vertical; min-height: 100px; }
+        
         .btn {
             width: 100%;
             padding: 12px;
@@ -54,50 +54,81 @@
             margin-top: 6px;
         }
         .btn:hover { background: #1d4ed8; }
-        .btn-refresh { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); margin-bottom: 12px; }
+        .btn-refresh { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); margin-bottom: 8px; }
         .btn-refresh:hover { background: rgba(255,255,255,0.15); }
-        
+
+        .btn-toggle-all {
+            background: rgba(59, 130, 246, 0.15);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: #93c5fd;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            cursor: pointer;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        .btn-toggle-all:hover { background: #2563eb; color: #fff; }
+        
         .status { margin-top: 14px; font-size: 12px; text-align: center; display: none; }
         .success { color: #10b981; }
         .error { color: #ef4444; }
 
-        .device-list { max-height: 480px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+        .device-list { max-height: 480px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
         .device-item {
             background: rgba(255, 255, 255, 0.04);
             border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 12px;
             padding: 12px 14px;
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            gap: 12px;
             transition: 0.2s;
+            cursor: pointer;
         }
         .device-item:hover { border-color: rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.07); }
+        .device-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: #2563eb;
+        }
+        .device-info { flex: 1; }
         .device-info .name { font-size: 13px; font-weight: 700; color: #fff; }
         .device-info .code { font-size: 12px; font-family: monospace; color: #60a5fa; font-weight: 800; letter-spacing: 1px; margin-top: 2px; }
         .device-info .time { font-size: 10px; color: #666; margin-top: 2px; }
-        .btn-select {
-            background: rgba(59, 130, 246, 0.2);
-            border: 1px solid rgba(59, 130, 246, 0.4);
-            color: #93c5fd;
-            padding: 6px 12px;
-            border-radius: 8px;
+
+        .guide-box {
+            background: rgba(59, 130, 246, 0.08);
+            border: 1px dashed rgba(59, 130, 246, 0.3);
+            border-radius: 10px;
+            padding: 10px 12px;
+            margin-top: 6px;
             font-size: 11px;
-            font-weight: 600;
-            cursor: pointer;
+            color: #93c5fd;
+            line-height: 1.5;
         }
-        .btn-select:hover { background: #2563eb; color: #fff; }
+        .guide-box code {
+            background: rgba(0,0,0,0.4);
+            padding: 2px 4px;
+            border-radius: 4px;
+            color: #fff;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <!-- 좌측: 기기 목록 패널 -->
+    <!-- 좌측: 기기 목록 패널 (다중 체크박스 선택) -->
     <div class="glass-card">
         <h2>INSTALLED DEVICES</h2>
-        <p class="sub">Supabase 데이터베이스에 등록된 실시간 기기 목록입니다.</p>
-        
-        <button class="btn btn-refresh" onclick="loadDevices()">기기 목록 새로고침</button>
+        <p class="sub">체크박스를 통해 여러 기기를 선택하여 일괄 발송할 수 있습니다.</p>
+        
+        <div style="display: flex; gap: 8px;">
+            <button class="btn btn-refresh" onclick="loadDevices()">기기 목록 새로고침</button>
+            <button class="btn-toggle-all" onclick="toggleSelectAll()">전체 선택/해제</button>
+        </div>
+
         <div id="deviceContainer" class="device-list">
             <div style="color: #666; font-size: 12px; text-align: center; padding: 20px;">기기 목록을 불러오는 중...</div>
         </div>
@@ -106,13 +137,14 @@
     <!-- 우측: 우편 발송 패널 -->
     <div class="glass-card">
         <h2>SEND POSTAL MAIL</h2>
-        <p class="sub">선택된 기기 또는 전체 사용자에게 우편을 발송합니다.</p>
+        <p class="sub">선택된 기기(들) 또는 전체 사용자에게 우편을 발송합니다.</p>
 
         <div class="field">
-            <label>수신 대상</label>
+            <label>수신 대상 모드</label>
             <select id="targetType" onchange="toggleTargetInput()">
+                <option value="SELECTED">좌측 체크된 기기 일괄 발송 (<span id="selectedCountText">0</span>개 선택됨)</option>
                 <option value="ALL">전체 사용자 (ALL)</option>
-                <option value="CUSTOM">특정 기기 식별번호 (1:1)</option>
+                <option value="CUSTOM">직접 8자리 코드 입력</option>
             </select>
         </div>
 
@@ -128,35 +160,49 @@
 
         <div class="field">
             <label>우편 본문 내용</label>
-            <textarea id="mailContent" placeholder="발송할 메시지 내용..."></textarea>
+            <textarea id="mailContent" placeholder="발송할 메시지 내용...&#10;버튼 예시: [상점으로 이동](https://web.black-market.store/shop)&#10;이미지 링크를 넣으면 사진이 자동 표시됩니다."></textarea>
+            
+            <div class="guide-box">
+                💡 <b>버튼 & 이미지 작성 팁:</b><br>
+                • <b>링크 버튼</b>: <code>[버튼이름](https://...)</code> 형식으로 쓰면 앱에서 터치 시 우편함이 닫히며 메인 웹뷰로 즉시 이동합니다.<br>
+                • <b>이미지</b>: <code>https://...png</code> 또는 <code>jpg</code> 링크를 단독 입력하면 카드로 표시됩니다.
+            </div>
         </div>
 
-        <button class="btn" onclick="sendMail()">우편 발송하기</button>
+        <button class="btn" onclick="sendMail()">우편 일괄 발송하기</button>
         <div id="statusBox" class="status"></div>
     </div>
 </div>
 
 <script>
-    // 끝의 /rest/v1 경로를 제거한 순수 기본 도메인 적용
     const SUPABASE_URL = "https://xirtaynusdyvtntlodpz.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhpcnRheW51c2R5dnRudGxvZHB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2MTQ5NTUsImV4cCI6MjEwNDE5MDk1NX0.RCiocVn7PZQnWHnyN8tGQ08AV5M5ZbvvIKB6-eQRseI";
 
     const { createClient } = supabase;
     const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+    let allDevicesList = [];
+
     function toggleTargetInput() {
         const type = document.getElementById('targetType').value;
         document.getElementById('customTargetField').style.display = (type === 'CUSTOM') ? 'block' : 'none';
     }
 
-    function selectDevice(code, name) {
-        document.getElementById('targetType').value = 'CUSTOM';
-        toggleTargetInput();
-        document.getElementById('targetDeviceId').value = code;
-        showStatus(`[${name} (${code})] 기기가 선택되었습니다.`, true);
+    function updateSelectedCount() {
+        const checked = document.querySelectorAll('.device-checkbox:checked');
+        const selectElem = document.getElementById('targetType');
+        selectElem.options[0].text = `좌측 체크된 기기 일괄 발송 (${checked.length}개 선택됨)`;
     }
 
-    // Supabase에서 기기 목록 조회
+    function toggleSelectAll() {
+        const checkboxes = document.querySelectorAll('.device-checkbox');
+        if (checkboxes.length === 0) return;
+        const anyUnchecked = Array.from(checkboxes).some(cb => !cb.checked);
+        checkboxes.forEach(cb => cb.checked = anyUnchecked);
+        updateSelectedCount();
+    }
+
+    // Supabase 기기 목록 로드
     async function loadDevices() {
         const container = document.getElementById('deviceContainer');
         container.innerHTML = '<div style="color: #666; font-size: 12px; text-align: center; padding: 20px;">기기 목록을 확인 중...</div>';
@@ -165,63 +211,97 @@
             const { data, error } = await db.from('devices').select('*').order('last_seen', { ascending: false });
             if (error) throw error;
 
-            if (!data || data.length === 0) {
+            allDevicesList = data || [];
+
+            if (allDevicesList.length === 0) {
                 container.innerHTML = `
                     <div style="color: #888; font-size: 12px; text-align: center; padding: 25px; line-height: 1.6;">
                         <b style="color: #60a5fa;">Supabase 연결 성공!</b><br>
-                        등록된 기기가 0대입니다.<br>
-                        앱을 실행하면 자동으로 등록됩니다.
+                        등록된 기기가 없습니다.<br>
+                        앱을 1회 실행하면 기기가 자동 등록됩니다.
                     </div>`;
+                updateSelectedCount();
                 return;
             }
 
             container.innerHTML = '';
-            data.forEach(d => {
+            allDevicesList.forEach(d => {
                 const item = document.createElement('div');
                 item.className = 'device-item';
                 item.innerHTML = `
+                    <input type="checkbox" class="device-checkbox" value="${d.device_id}" onchange="updateSelectedCount()">
                     <div class="device-info">
                         <div class="name">${d.device_name || 'iPhone'}</div>
                         <div class="code">${d.device_id}</div>
                         <div class="time">최근 접속: ${d.last_seen || '-'}</div>
                     </div>
-                    <button class="btn-select" onclick="selectDevice('${d.device_id}', '${d.device_name}')">선택</button>
                 `;
+                // 항목 클릭 시 체크박스 토글
+                item.addEventListener('click', (e) => {
+                    if (e.target.tagName !== 'INPUT') {
+                        const cb = item.querySelector('.device-checkbox');
+                        cb.checked = !cb.checked;
+                        updateSelectedCount();
+                    }
+                });
                 container.appendChild(item);
             });
+            updateSelectedCount();
         } catch (e) {
             container.innerHTML = `<div style="color: #ef4444; font-size: 12px; text-align: center; padding: 20px;">${e.message || e}</div>`;
         }
     }
 
-    // Supabase inbox 테이블에 우편 저장
+    // 우편 발송 (다중 선택 일괄 전송 지원)
     async function sendMail() {
         const targetType = document.getElementById('targetType').value;
-        const targetDeviceId = targetType === 'ALL' ? 'ALL' : document.getElementById('targetDeviceId').value.trim().toUpperCase();
         const title = document.getElementById('mailTitle').value.trim();
         const content = document.getElementById('mailContent').value.trim();
 
-        if (!title || !content || (targetType === 'CUSTOM' && !targetDeviceId)) {
-            showStatus('모든 필드를 올바르게 입력해주세요.', false);
+        if (!title || !content) {
+            showStatus('우편 제목과 내용을 모두 입력해주세요.', false);
             return;
         }
 
-        showStatus('우편 발송 중...', true);
+        let targetIds = [];
+
+        if (targetType === 'ALL') {
+            targetIds = ['ALL'];
+        } else if (targetType === 'CUSTOM') {
+            const singleId = document.getElementById('targetDeviceId').value.trim().toUpperCase();
+            if (!singleId) {
+                showStatus('수신 기기 식별코드를 입력해주세요.', false);
+                return;
+            }
+            targetIds = [singleId];
+        } else {
+            // SELECTED (체크된 기기들)
+            const checkedBoxes = document.querySelectorAll('.device-checkbox:checked');
+            if (checkedBoxes.length === 0) {
+                showStatus('좌측 목록에서 최소 1대 이상의 기기를 체크해주세요.', false);
+                return;
+            }
+            targetIds = Array.from(checkedBoxes).map(cb => cb.value);
+        }
+
+        showStatus(`우편 발송 중... (총 ${targetIds.length}개 대상)`, true);
 
         const today = new Date().toISOString().split('T')[0];
-        const { error } = await db.from('inbox').insert([
-            {
-                target_device_id: targetDeviceId,
-                title: title,
-                content: content,
-                date: today
-            }
-        ]);
+        
+        // Supabase 배치 인서트 레코드 구성
+        const insertRows = targetIds.map(id => ({
+            target_device_id: id,
+            title: title,
+            content: content,
+            date: today
+        }));
+
+        const { error } = await db.from('inbox').insert(insertRows);
 
         if (error) {
             showStatus('발송 실패: ' + error.message, false);
         } else {
-            showStatus(`우편 발송 완료! (${targetDeviceId})`, true);
+            showStatus(`총 ${targetIds.length}건의 우편이 성공적으로 발송되었습니다!`, true);
             document.getElementById('mailTitle').value = '';
             document.getElementById('mailContent').value = '';
         }
