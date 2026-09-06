@@ -3,6 +3,7 @@ import WebKit
 import UserNotifications
 import AuthenticationServices
 import CryptoKit
+import Photos
 
 // MARK: - 우편 모델
 struct MailItem: Identifiable, Codable {
@@ -76,6 +77,102 @@ struct DeviceIdManager {
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
         URLSession.shared.dataTask(with: req).resume()
     }
+}
+
+// MARK: - 사진 및 동영상 사진앱 저장 매니저
+class MediaSaveManager: NSObject, ObservableObject {
+    static let shared = MediaSaveManager()
+
+    func saveImage(url: URL, completion: @escaping (Bool) -> Void) {
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            guard let data = data, let image = UIImage(data: data) else {
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                guard status == .authorized || status == .limited else {
+                    DispatchQueue.main.async { completion(false) }
+                    return
+                }
+
+                PHPhotoLibrary.shared().performChanges({
+                    PHAssetChangeRequest.creationRequestForAsset(from: image)
+                }) { success, _ in
+                    DispatchQueue.main.async { completion(success) }
+                }
+            }
+        }.resume()
+    }
+
+    func saveVideo(url: URL, completion: @escaping (Bool) -> Void) {
+        URLSession.shared.downloadTask(with: url) { localURL, _, _ in
+            guard let localURL = localURL else {
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+
+            let tempDir = FileManager.default.temporaryDirectory
+            let targetURL = tempDir.appendingPathComponent("\(UUID().uuidString).\(url.pathExtension)")
+            try? FileManager.default.copyItem(at: localURL, to: targetURL)
+
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                guard status == .authorized || status == .limited else {
+                    DispatchQueue.main.async { completion(false) }
+                    return
+                }
+
+                PHPhotoLibrary.shared().performChanges({
+                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: targetURL)
+                }) { success, _ in
+                    try? FileManager.default.removeItem(at: targetURL)
+                    DispatchQueue.main.async { completion(success) }
+                }
+            }
+        }.resume()
+    }
+}
+
+// MARK: - Video.js 웹킷 플레이어 (UI WebView)
+struct VideoJSPlayerView: UIViewRepresentable {
+    let videoURL: URL
+
+    func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
+
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.backgroundColor = .clear
+        webView.isOpaque = false
+        webView.scrollView.isScrollEnabled = false
+
+        let htmlString = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+            <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
+            <style>
+                body { margin: 0; padding: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+                .video-js { width: 100vw; height: 100vh; }
+                .vjs-control-bar { background: rgba(10, 10, 15, 0.7) !important; backdrop-filter: blur(10px); }
+                .vjs-play-progress, .vjs-volume-level { background-color: #3b82f6 !important; }
+            </style>
+        </head>
+        <body>
+            <video id="my-video" class="video-js vjs-default-skin vjs-big-play-centered" controls preload="auto" playsinline>
+                <source src="\(videoURL.absoluteString)" type="video/mp4">
+            </video>
+            <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+        </body>
+        </html>
+        """
+        webView.loadHTMLString(htmlString, baseURL: nil)
+        return webView
+    }
+
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
 }
 
 // MARK: - AppDelegate
@@ -169,7 +266,6 @@ struct BlackMarketApp: App {
                 })
             }
             .sheet(isPresented: $showMailSheet) {
-                // 버튼 누르면 우편함 닫고 메인 웹뷰 이동
                 MailboxView(onNavigateURL: { targetURL in
                     showMailSheet = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -278,158 +374,76 @@ struct LiquidGlassNavigationBar: View {
     }
 }
 
-// MARK: - 앱 정보 모달 (방패 6번 터치 이스터에그)
-struct AppInfoView: View {
-    @Environment(\.presentationMode) var presentationMode
-    var onEasterEggTriggered: (() -> Void)? = nil
-
-    @State private var dragRotationX: Double = 0
-    @State private var dragRotationY: Double = 0
-    @State private var tapCount: Int = 0
-    @State private var lastTapTime: Date = Date()
-
-    var appVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0" }
-    var buildNumber: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1" }
+// MARK: - 이미지 전체화면 확대 뷰어 모달
+struct FullScreenImageViewer: View {
+    let imageURL: URL
+    @Binding var isPresented: Bool
+    @State private var isSaved: Bool = false
+    @State private var isSaving: Bool = false
 
     var body: some View {
-        ZStack {
-            Color(red: 0.05, green: 0.05, blue: 0.07).edgesIgnoringSafeArea(.all)
+        ZStack(alignment: .topTrailing) {
+            Color.black.edgesIgnoringSafeArea(.all)
 
-            VStack(spacing: 24) {
-                Capsule()
-                    .fill(Color.white.opacity(0.25))
-                    .frame(width: 36, height: 4)
-                    .padding(.top, 12)
-
-                VStack(spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.white.opacity(0.15), Color.white.opacity(0.03)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 80, height: 80)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                    .stroke(Color.white.opacity(0.35), lineWidth: 1)
-                            )
-                            .shadow(color: Color.blue.opacity(0.2), radius: 15, x: 0, y: 5)
-                        
-                        Image(systemName: "shield.lefthalf.filled")
-                            .font(.system(size: 38))
-                            .foregroundColor(.white)
-                    }
-                    .rotation3DEffect(.degrees(dragRotationX), axis: (x: 1.0, y: 0.0, z: 0.0))
-                    .rotation3DEffect(.degrees(dragRotationY), axis: (x: 0.0, y: 1.0, z: 0.0))
-                    .onTapGesture {
-                        let now = Date()
-                        if now.timeIntervalSince(lastTapTime) > 1.2 {
-                            tapCount = 1
-                        } else {
-                            tapCount += 1
-                        }
-                        lastTapTime = now
-
-                        let generator = UIImpactFeedbackGenerator(style: .light)
-                        generator.impactOccurred()
-
-                        if tapCount >= 6 {
-                            tapCount = 0
-                            let heavyGenerator = UINotificationFeedbackGenerator()
-                            heavyGenerator.notificationOccurred(.success)
-                            onEasterEggTriggered?()
-                        }
-                    }
-                    .gesture(
-                        DragGesture()
-                            .onChanged { value in
-                                withAnimation(.interactiveSpring()) {
-                                    dragRotationY = Double(value.translation.width) * 0.8
-                                    dragRotationX = -Double(value.translation.height) * 0.8
-                                }
-                            }
-                            .onEnded { _ in
-                                withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
-                                    dragRotationX = 0
-                                    dragRotationY = 0
-                                }
-                            }
-                    )
-
-                    Text("BLACK MARKET")
-                        .font(.system(size: 18, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
-                        .tracking(2)
-
-                    Text("방패를 손가락으로 드래그하여 회전시켜보세요")
-                        .font(.system(size: 11))
-                        .foregroundColor(.gray.opacity(0.8))
+            AsyncImage(url: imageURL) { phase in
+                switch phase {
+                case .success(let img):
+                    img.resizable()
+                        .scaledToFit()
+                        .padding()
+                case .failure(_):
+                    Text("이미지를 불러올 수 없습니다.").foregroundColor(.gray)
+                default:
+                    ProgressView().colorScheme(.dark)
                 }
-                .padding(.top, 4)
-
-                VStack(spacing: 14) {
-                    infoRow(title: "애플리케이션 버전", value: "v\(appVersion)")
-                    Divider().background(Color.white.opacity(0.1))
-                    infoRow(title: "빌드 번호", value: "Build #\(buildNumber)")
-                    Divider().background(Color.white.opacity(0.1))
-                    infoRow(title: "기기 식별 모델", value: DeviceIdManager.getDeviceModelName())
-                    Divider().background(Color.white.opacity(0.1))
-                    infoRow(title: "생체인증 패스키", value: "비활성화됨")
-                    Divider().background(Color.white.opacity(0.1))
-                    infoRow(title: "보안 샌드박스", value: "TLS 1.3 암호화")
-                }
-                .padding(18)
-                .background(
-                    ZStack {
-                        BlurView(style: .systemThinMaterialDark)
-                        Color.white.opacity(0.03)
-                    }
-                )
-                .cornerRadius(18)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18)
-                        .stroke(Color.white.opacity(0.15), lineWidth: 0.8)
-                )
-                .padding(.horizontal, 20)
-
-                Spacer()
-
-                Button(action: { presentationMode.wrappedValue.dismiss() }) {
-                    Text("닫기")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.white.opacity(0.1))
-                        .cornerRadius(14)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(Color.white.opacity(0.2), lineWidth: 0.8)
-                        )
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
             }
-        }
-    }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-    func infoRow(title: String, value: String) -> some View {
-        HStack {
-            Text(title).font(.system(size: 13)).foregroundColor(.gray)
-            Spacer()
-            Text(value).font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundColor(value == "비활성화됨" ? Color.red.opacity(0.8) : .white)
+            // 상단 우측: 사진앱 저장 & 닫기 버튼
+            HStack(spacing: 16) {
+                Button(action: {
+                    guard !isSaving else { return }
+                    isSaving = true
+                    MediaSaveManager.shared.saveImage(url: imageURL) { success in
+                        isSaving = false
+                        if success {
+                            isSaved = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { isSaved = false }
+                        }
+                    }
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: isSaved ? "checkmark" : "square.and.arrow.down")
+                        Text(isSaved ? "저장됨" : "사진앱 저장")
+                    }
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(isSaved ? Color.green : Color.blue)
+                    .clipShape(Capsule())
+                }
+
+                Button(action: { isPresented = false }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 26))
+                        .foregroundColor(.white.opacity(0.8))
+                }
+            }
+            .padding(.top, 50)
+            .padding(.trailing, 20)
         }
     }
 }
 
-// MARK: - 우편 본문 정밀 파서 (마크다운 버튼 & 이미지 렌더링)
+// MARK: - 우편 본문 정밀 파서 (Video.js + 이미지 뷰어 + 버튼 통합)
 struct MailContentView: View {
     let content: String
     let onNavigateURL: ((URL) -> Void)?
+
+    @State private var selectedPreviewImage: URL? = nil
+    @State private var savedVideoURLs: Set<URL> = []
+    @State private var savingVideoURLs: Set<URL> = []
 
     struct ActionBtn: Identifiable {
         let id = UUID()
@@ -437,7 +451,7 @@ struct MailContentView: View {
         let url: URL
     }
 
-    // [버튼명](링크) 파싱
+    // 1. [버튼명](링크) 파싱
     var parsedButtons: [ActionBtn] {
         let pattern = "\\[([^\\]]+)\\]\\((https?://[^\\)]+)\\)"
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
@@ -453,23 +467,37 @@ struct MailContentView: View {
         }
     }
 
-    // 이미지 URL 파싱
-    var parsedImages: [URL] {
-        let pattern = "(https?://[^\\s]+\\.(?:png|jpg|jpeg|gif|webp))"
+    // 2. 동영상 파일 URL 파싱 (mp4, mov, webm, m4v)
+    var parsedVideos: [URL] {
+        let pattern = "(https?://[^\\s]+\\.(?:mp4|mov|webm|m4v))"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
         let nsContent = content as NSString
         let matches = regex.matches(in: content, range: NSRange(location: 0, length: nsContent.length))
-        
+
         return matches.compactMap { m in
             let urlString = nsContent.substring(with: m.range)
             return URL(string: urlString)
         }
     }
 
-    // 순수 텍스트 본문
+    // 3. 이미지 URL 파싱 (png, jpg, jpeg, gif, webp)
+    var parsedImages: [URL] {
+        let pattern = "(https?://[^\\s]+\\.(?:png|jpg|jpeg|gif|webp))"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
+        let nsContent = content as NSString
+        let matches = regex.matches(in: content, range: NSRange(location: 0, length: nsContent.length))
+
+        return matches.compactMap { m in
+            let urlString = nsContent.substring(with: m.range)
+            return URL(string: urlString)
+        }
+    }
+
+    // 4. 순수 텍스트 본문 추출
     var cleanedText: String {
         var txt = content
         txt = txt.replacingOccurrences(of: "\\[([^\\]]+)\\]\\((https?://[^\\)]+)\\)", with: "", options: .regularExpression)
+        txt = txt.replacingOccurrences(of: "(https?://[^\\s]+\\.(?:mp4|mov|webm|m4v))", with: "", options: .regularExpression)
         txt = txt.replacingOccurrences(of: "(https?://[^\\s]+\\.(?:png|jpg|jpeg|gif|webp))", with: "", options: .regularExpression)
         return txt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -483,7 +511,42 @@ struct MailContentView: View {
                     .lineSpacing(4)
             }
 
-            // 업로드된 이미지 표시
+            // 동영상: Video.js 플레이어 및 동영상 저장 버튼
+            ForEach(parsedVideos, id: \.self) { vidURL in
+                VStack(alignment: .trailing, spacing: 6) {
+                    VideoJSPlayerView(videoURL: vidURL)
+                        .frame(height: 190)
+                        .cornerRadius(12)
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.15), lineWidth: 0.8))
+
+                    Button(action: {
+                        guard !savingVideoURLs.contains(vidURL) else { return }
+                        savingVideoURLs.insert(vidURL)
+                        MediaSaveManager.shared.saveVideo(url: vidURL) { success in
+                            savingVideoURLs.remove(vidURL)
+                            if success {
+                                savedVideoURLs.insert(vidURL)
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                                    savedVideoURLs.remove(vidURL)
+                                }
+                            }
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: savedVideoURLs.contains(vidURL) ? "checkmark" : "video.badge.plus")
+                            Text(savedVideoURLs.contains(vidURL) ? "동영상 저장됨" : "사진앱에 동영상 저장")
+                        }
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(savedVideoURLs.contains(vidURL) ? .green : .blue)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.white.opacity(0.06))
+                        .cornerRadius(8)
+                    }
+                }
+            }
+
+            // 이미지: 탭 시 전체화면 확대 뷰어 실행
             ForEach(parsedImages, id: \.self) { imgURL in
                 AsyncImage(url: imgURL) { phase in
                     switch phase {
@@ -492,6 +555,9 @@ struct MailContentView: View {
                             .scaledToFit()
                             .cornerRadius(10)
                             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.15), lineWidth: 0.8))
+                            .onTapGesture {
+                                selectedPreviewImage = imgURL
+                            }
                     case .empty:
                         ProgressView().colorScheme(.dark).frame(height: 120)
                     default:
@@ -531,7 +597,21 @@ struct MailContentView: View {
                 .padding(.top, 4)
             }
         }
+        .fullScreenCover(item: Binding(
+            get: { selectedPreviewImage.map { IdentifiableURL(url: $0) } },
+            set: { selectedPreviewImage = $0?.url }
+        )) { item in
+            FullScreenImageViewer(imageURL: item.url, isPresented: Binding(
+                get: { selectedPreviewImage != nil },
+                set: { if !$0 { selectedPreviewImage = nil } }
+            ))
+        }
     }
+}
+
+struct IdentifiableURL: Identifiable {
+    let id = UUID()
+    let url: URL
 }
 
 // MARK: - 우편함 모달
@@ -932,6 +1012,154 @@ struct CustomLoadingOverlay: View {
         .onAppear {
             withAnimation(.linear(duration: 1.0).repeatForever(autoreverses: false)) { rotateDegree = 360 }
             withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) { isPulsing = true }
+        }
+    }
+}
+
+// MARK: - 앱 정보 모달 (방패 6번 터치 이스터에그)
+struct AppInfoView: View {
+    @Environment(\.presentationMode) var presentationMode
+    var onEasterEggTriggered: (() -> Void)? = nil
+
+    @State private var dragRotationX: Double = 0
+    @State private var dragRotationY: Double = 0
+    @State private var tapCount: Int = 0
+    @State private var lastTapTime: Date = Date()
+
+    var appVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0" }
+    var buildNumber: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1" }
+
+    var body: some View {
+        ZStack {
+            Color(red: 0.05, green: 0.05, blue: 0.07).edgesIgnoringSafeArea(.all)
+
+            VStack(spacing: 24) {
+                Capsule()
+                    .fill(Color.white.opacity(0.25))
+                    .frame(width: 36, height: 4)
+                    .padding(.top, 12)
+
+                VStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.15), Color.white.opacity(0.03)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 80, height: 80)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                    .stroke(Color.white.opacity(0.35), lineWidth: 1)
+                            )
+                            .shadow(color: Color.blue.opacity(0.2), radius: 15, x: 0, y: 5)
+                        
+                        Image(systemName: "shield.lefthalf.filled")
+                            .font(.system(size: 38))
+                            .foregroundColor(.white)
+                    }
+                    .rotation3DEffect(.degrees(dragRotationX), axis: (x: 1.0, y: 0.0, z: 0.0))
+                    .rotation3DEffect(.degrees(dragRotationY), axis: (x: 0.0, y: 1.0, z: 0.0))
+                    .onTapGesture {
+                        let now = Date()
+                        if now.timeIntervalSince(lastTapTime) > 1.2 {
+                            tapCount = 1
+                        } else {
+                            tapCount += 1
+                        }
+                        lastTapTime = now
+
+                        let generator = UIImpactFeedbackGenerator(style: .light)
+                        generator.impactOccurred()
+
+                        if tapCount >= 6 {
+                            tapCount = 0
+                            let heavyGenerator = UINotificationFeedbackGenerator()
+                            heavyGenerator.notificationOccurred(.success)
+                            onEasterEggTriggered?()
+                        }
+                    }
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                withAnimation(.interactiveSpring()) {
+                                    dragRotationY = Double(value.translation.width) * 0.8
+                                    dragRotationX = -Double(value.translation.height) * 0.8
+                                }
+                            }
+                            .onEnded { _ in
+                                withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
+                                    dragRotationX = 0
+                                    dragRotationY = 0
+                                }
+                            }
+                    )
+
+                    Text("BLACK MARKET")
+                        .font(.system(size: 18, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+                        .tracking(2)
+
+                    Text("방패를 손가락으로 드래그하여 회전시켜보세요")
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray.opacity(0.8))
+                }
+                .padding(.top, 4)
+
+                VStack(spacing: 14) {
+                    infoRow(title: "애플리케이션 버전", value: "v\(appVersion)")
+                    Divider().background(Color.white.opacity(0.1))
+                    infoRow(title: "빌드 번호", value: "Build #\(buildNumber)")
+                    Divider().background(Color.white.opacity(0.1))
+                    infoRow(title: "기기 식별 모델", value: DeviceIdManager.getDeviceModelName())
+                    Divider().background(Color.white.opacity(0.1))
+                    infoRow(title: "생체인증 패스키", value: "비활성화됨")
+                    Divider().background(Color.white.opacity(0.1))
+                    infoRow(title: "보안 샌드박스", value: "TLS 1.3 암호화")
+                }
+                .padding(18)
+                .background(
+                    ZStack {
+                        BlurView(style: .systemThinMaterialDark)
+                        Color.white.opacity(0.03)
+                    }
+                )
+                .cornerRadius(18)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18)
+                        .stroke(Color.white.opacity(0.15), lineWidth: 0.8)
+                )
+                .padding(.horizontal, 20)
+
+                Spacer()
+
+                Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                    Text("닫기")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(14)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 0.8)
+                        )
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+            }
+        }
+    }
+
+    func infoRow(title: String, value: String) -> some View {
+        HStack {
+            Text(title).font(.system(size: 13)).foregroundColor(.gray)
+            Spacer()
+            Text(value).font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .foregroundColor(value == "비활성화됨" ? Color.red.opacity(0.8) : .white)
         }
     }
 }
