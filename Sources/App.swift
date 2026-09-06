@@ -79,13 +79,14 @@ struct DeviceIdManager {
     }
 }
 
-// MARK: - 사진 및 동영상 사진앱 저장 매니저
+// MARK: - 사진 및 동영상 사진앱(Photos) 안전 저장 모듈
 class MediaSaveManager: NSObject, ObservableObject {
     static let shared = MediaSaveManager()
 
+    // 사진 / GIF 저장
     func saveImage(url: URL, completion: @escaping (Bool) -> Void) {
         URLSession.shared.dataTask(with: url) { data, _, _ in
-            guard let data = data, let image = UIImage(data: data) else {
+            guard let data = data else {
                 DispatchQueue.main.async { completion(false) }
                 return
             }
@@ -97,27 +98,42 @@ class MediaSaveManager: NSObject, ObservableObject {
                 }
 
                 PHPhotoLibrary.shared().performChanges({
-                    PHAssetChangeRequest.creationRequestForAsset(from: image)
-                }) { success, _ in
-                    DispatchQueue.main.async { completion(success) }
+                    let creationRequest = PHAssetCreationRequest.forAsset()
+                    creationRequest.addResource(with: .photo, data: data, options: nil)
+                }) { success, error in
+                    DispatchQueue.main.async {
+                        completion(success)
+                    }
                 }
             }
         }.resume()
     }
 
+    // 동영상(mp4, mov) 사진앱 저장
     func saveVideo(url: URL, completion: @escaping (Bool) -> Void) {
-        URLSession.shared.downloadTask(with: url) { localURL, _, _ in
-            guard let localURL = localURL else {
+        URLSession.shared.downloadTask(with: url) { localURL, _, error in
+            guard let localURL = localURL, error == nil else {
                 DispatchQueue.main.async { completion(false) }
                 return
             }
 
+            let fileExtension = url.pathExtension.isEmpty ? "mp4" : url.pathExtension
             let tempDir = FileManager.default.temporaryDirectory
-            let targetURL = tempDir.appendingPathComponent("\(UUID().uuidString).\(url.pathExtension)")
-            try? FileManager.default.copyItem(at: localURL, to: targetURL)
+            let targetURL = tempDir.appendingPathComponent("\(UUID().uuidString).\(fileExtension)")
+
+            do {
+                if FileManager.default.fileExists(atPath: targetURL.path) {
+                    try FileManager.default.removeItem(at: targetURL)
+                }
+                try FileManager.default.copyItem(at: localURL, to: targetURL)
+            } catch {
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
 
             PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
                 guard status == .authorized || status == .limited else {
+                    try? FileManager.default.removeItem(at: targetURL)
                     DispatchQueue.main.async { completion(false) }
                     return
                 }
@@ -126,14 +142,16 @@ class MediaSaveManager: NSObject, ObservableObject {
                     PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: targetURL)
                 }) { success, _ in
                     try? FileManager.default.removeItem(at: targetURL)
-                    DispatchQueue.main.async { completion(success) }
+                    DispatchQueue.main.async {
+                        completion(success)
+                    }
                 }
             }
         }.resume()
     }
 }
 
-// MARK: - Video.js 웹킷 플레이어 (UI WebView)
+// MARK: - Video.js 커스텀 웹킷 뷰어 (iOS 전체화면 강제 전환 차단 및 순수 인라인 테마 적용)
 struct VideoJSPlayerView: UIViewRepresentable {
     let videoURL: URL
 
@@ -143,25 +161,35 @@ struct VideoJSPlayerView: UIViewRepresentable {
         config.mediaTypesRequiringUserActionForPlayback = []
 
         let webView = WKWebView(frame: .zero, configuration: config)
-        webView.backgroundColor = .clear
+        webView.backgroundColor = .black
         webView.isOpaque = false
         webView.scrollView.isScrollEnabled = false
+        webView.scrollView.bounces = false
 
         let htmlString = """
         <!DOCTYPE html>
         <html>
         <head>
+            <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
             <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
             <style>
-                body { margin: 0; padding: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; }
-                .video-js { width: 100vw; height: 100vh; }
-                .vjs-control-bar { background: rgba(10, 10, 15, 0.7) !important; backdrop-filter: blur(10px); }
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+                .video-js { width: 100% !important; height: 100% !important; }
+                .video-js .vjs-tech { object-fit: contain; }
+                .vjs-control-bar { background: rgba(15, 15, 20, 0.75) !important; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-radius: 0 0 10px 10px; }
                 .vjs-play-progress, .vjs-volume-level { background-color: #3b82f6 !important; }
+                .vjs-big-play-button { border-radius: 50% !important; width: 50px !important; height: 50px !important; line-height: 50px !important; border: 2px solid rgba(255,255,255,0.8) !important; background: rgba(0,0,0,0.6) !important; margin-left: -25px !important; margin-top: -25px !important; }
             </style>
         </head>
         <body>
-            <video id="my-video" class="video-js vjs-default-skin vjs-big-play-centered" controls preload="auto" playsinline>
+            <video id="my-video" 
+                   class="video-js vjs-default-skin vjs-big-play-centered" 
+                   controls 
+                   preload="metadata" 
+                   playsinline 
+                   webkit-playsinline>
                 <source src="\(videoURL.absoluteString)" type="video/mp4">
             </video>
             <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
@@ -374,7 +402,7 @@ struct LiquidGlassNavigationBar: View {
     }
 }
 
-// MARK: - 이미지 전체화면 확대 뷰어 모달
+// MARK: - 이미지 전체화면 확대 뷰어 모달 (사진앱 저장 기능 탑재)
 struct FullScreenImageViewer: View {
     let imageURL: URL
     @Binding var isPresented: Bool
@@ -399,8 +427,7 @@ struct FullScreenImageViewer: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // 상단 우측: 사진앱 저장 & 닫기 버튼
-            HStack(spacing: 16) {
+            HStack(spacing: 14) {
                 Button(action: {
                     guard !isSaving else { return }
                     isSaving = true
@@ -414,7 +441,7 @@ struct FullScreenImageViewer: View {
                 }) {
                     HStack(spacing: 6) {
                         Image(systemName: isSaved ? "checkmark" : "square.and.arrow.down")
-                        Text(isSaved ? "저장됨" : "사진앱 저장")
+                        Text(isSaved ? "저장 완료" : "사진앱 저장")
                     }
                     .font(.system(size: 13, weight: .bold))
                     .foregroundColor(.white)
@@ -436,7 +463,7 @@ struct FullScreenImageViewer: View {
     }
 }
 
-// MARK: - 우편 본문 정밀 파서 (Video.js + 이미지 뷰어 + 버튼 통합)
+// MARK: - 우편 본문 정밀 파서 (Video.js + GIF/이미지 + 버튼 통합)
 struct MailContentView: View {
     let content: String
     let onNavigateURL: ((URL) -> Void)?
@@ -467,7 +494,7 @@ struct MailContentView: View {
         }
     }
 
-    // 2. 동영상 파일 URL 파싱 (mp4, mov, webm, m4v)
+    // 2. 동영상 URL 파싱 (mp4, mov, webm, m4v)
     var parsedVideos: [URL] {
         let pattern = "(https?://[^\\s]+\\.(?:mp4|mov|webm|m4v))"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
@@ -480,7 +507,7 @@ struct MailContentView: View {
         }
     }
 
-    // 3. 이미지 URL 파싱 (png, jpg, jpeg, gif, webp)
+    // 3. 사진 및 GIF URL 파싱 (png, jpg, jpeg, gif, webp)
     var parsedImages: [URL] {
         let pattern = "(https?://[^\\s]+\\.(?:png|jpg|jpeg|gif|webp))"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
@@ -511,11 +538,11 @@ struct MailContentView: View {
                     .lineSpacing(4)
             }
 
-            // 동영상: Video.js 플레이어 및 동영상 저장 버튼
+            // 동영상 (Video.js 뷰어 + 동영상 사진앱 저장)
             ForEach(parsedVideos, id: \.self) { vidURL in
                 VStack(alignment: .trailing, spacing: 6) {
                     VideoJSPlayerView(videoURL: vidURL)
-                        .frame(height: 190)
+                        .frame(height: 200)
                         .cornerRadius(12)
                         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.15), lineWidth: 0.8))
 
@@ -532,21 +559,21 @@ struct MailContentView: View {
                             }
                         }
                     }) {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 5) {
                             Image(systemName: savedVideoURLs.contains(vidURL) ? "checkmark" : "video.badge.plus")
-                            Text(savedVideoURLs.contains(vidURL) ? "동영상 저장됨" : "사진앱에 동영상 저장")
+                            Text(savedVideoURLs.contains(vidURL) ? "동영상 저장 완료" : (savingVideoURLs.contains(vidURL) ? "저장 중..." : "사진앱에 동영상 저장"))
                         }
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(savedVideoURLs.contains(vidURL) ? .green : .blue)
                         .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
+                        .padding(.vertical, 6)
                         .background(Color.white.opacity(0.06))
                         .cornerRadius(8)
                     }
                 }
             }
 
-            // 이미지: 탭 시 전체화면 확대 뷰어 실행
+            // 이미지 & GIF (탭 시 전체화면 확대 및 사진앱 저장 지원)
             ForEach(parsedImages, id: \.self) { imgURL in
                 AsyncImage(url: imgURL) { phase in
                     switch phase {
@@ -566,7 +593,7 @@ struct MailContentView: View {
                 }
             }
 
-            // [버튼명](링크) 액션 버튼 렌더링
+            // [버튼명](링크) 버튼 렌더링
             if !parsedButtons.isEmpty {
                 VStack(spacing: 8) {
                     ForEach(parsedButtons) { btn in
@@ -914,7 +941,7 @@ struct WebViewContainer: UIViewRepresentable {
                 }
             }
 
-            let fileExtensions = ["zip", "ipa", "pdf", "apk", "rar", "7z", "txt", "png", "jpg", "jpeg"]
+            let fileExtensions = ["zip", "ipa", "pdf", "apk", "rar", "7z", "txt", "png", "jpg", "jpeg", "gif"]
             if fileExtensions.contains(reqURL.pathExtension.lowercased()) {
                 if #available(iOS 14.5, *) {
                     decisionHandler(.download)
