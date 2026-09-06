@@ -1,320 +1,942 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Black Market - Mail & Device Admin (Supabase)</title>
-    <!-- Supabase JS 라이브러리 -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; }
-        body { background: #08080a; color: #fff; min-height: 100vh; padding: 30px 20px; display: flex; justify-content: center; }
-        .container { width: 100%; max-width: 1000px; display: grid; grid-template-columns: 1.15fr 1fr; gap: 24px; }
-        @media (max-width: 860px) { .container { grid-template-columns: 1fr; } }
-        
-        .glass-card {
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(25px);
-            -webkit-backdrop-filter: blur(25px);
-            border-radius: 20px;
-            padding: 26px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.6);
-            height: fit-content;
-        }
-        h2 { font-size: 18px; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px; }
-        p.sub { font-size: 12px; color: #777; margin-bottom: 16px; }
-        .field { margin-bottom: 16px; }
-        label { display: block; font-size: 11px; font-weight: 600; color: #999; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
-        input, textarea, select {
-            width: 100%;
-            background: rgba(0, 0, 0, 0.45);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 10px;
-            padding: 10px 12px;
-            color: #fff;
-            font-size: 13px;
-            outline: none;
-            transition: 0.2s;
-        }
-        input:focus, textarea:focus, select:focus { border-color: #3b82f6; box-shadow: 0 0 10px rgba(59,130,246,0.3); }
-        textarea { resize: vertical; min-height: 100px; }
-        
-        .btn {
-            width: 100%;
-            padding: 12px;
-            background: #2563eb;
-            border: none;
-            border-radius: 10px;
-            color: #fff;
-            font-weight: 700;
-            font-size: 13px;
-            cursor: pointer;
-            transition: 0.2s;
-            margin-top: 6px;
-        }
-        .btn:hover { background: #1d4ed8; }
-        .btn-refresh { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); margin-bottom: 8px; }
-        .btn-refresh:hover { background: rgba(255,255,255,0.15); }
+import SwiftUI
+import WebKit
+import UserNotifications
+import AuthenticationServices
+import CryptoKit
 
-        .btn-toggle-all {
-            background: rgba(59, 130, 246, 0.15);
-            border: 1px solid rgba(59, 130, 246, 0.3);
-            color: #93c5fd;
-            padding: 6px 12px;
-            border-radius: 6px;
-            font-size: 11px;
-            cursor: pointer;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-        .btn-toggle-all:hover { background: #2563eb; color: #fff; }
-        
-        .status { margin-top: 14px; font-size: 12px; text-align: center; display: none; }
-        .success { color: #10b981; }
-        .error { color: #ef4444; }
+// MARK: - 우편 모델
+struct MailItem: Identifiable, Codable {
+    let id: Int
+    let target_device_id: String
+    let title: String
+    let content: String
+    let date: String
+}
 
-        .device-list { max-height: 480px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
-        .device-item {
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px;
-            padding: 12px 14px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            transition: 0.2s;
-            cursor: pointer;
-        }
-        .device-item:hover { border-color: rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.07); }
-        .device-item input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-            cursor: pointer;
-            accent-color: #2563eb;
-        }
-        .device-info { flex: 1; }
-        .device-info .name { font-size: 13px; font-weight: 700; color: #fff; }
-        .device-info .code { font-size: 12px; font-family: monospace; color: #60a5fa; font-weight: 800; letter-spacing: 1px; margin-top: 2px; }
-        .device-info .time { font-size: 10px; color: #666; margin-top: 2px; }
+// MARK: - 기기 식별자 & Supabase 연동 모듈
+struct DeviceIdManager {
+    private static let salt = "BM_DEVICE_SALT_2026"
 
-        .guide-box {
-            background: rgba(59, 130, 246, 0.08);
-            border: 1px dashed rgba(59, 130, 246, 0.3);
-            border-radius: 10px;
-            padding: 10px 12px;
-            margin-top: 6px;
-            font-size: 11px;
-            color: #93c5fd;
-            line-height: 1.5;
-        }
-        .guide-box code {
-            background: rgba(0,0,0,0.4);
-            padding: 2px 4px;
-            border-radius: 4px;
-            color: #fff;
-        }
-    </style>
-</head>
-<body>
+    static let supabaseUrl = "https://xirtaynusdyvtntlodpz.supabase.co"
+    static let supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhpcnRheW51c2R5dnRudGxvZHB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2MTQ5NTUsImV4cCI6MjEwNDE5MDk1NX0.RCiocVn7PZQnWHnyN8tGQ08AV5M5ZbvvIKB6-eQRseI"
 
-<div class="container">
-    <!-- 좌측: 기기 목록 패널 (다중 체크박스 선택) -->
-    <div class="glass-card">
-        <h2>INSTALLED DEVICES</h2>
-        <p class="sub">체크박스를 통해 여러 기기를 선택하여 일괄 발송할 수 있습니다.</p>
-        
-        <div style="display: flex; gap: 8px;">
-            <button class="btn btn-refresh" onclick="loadDevices()">기기 목록 새로고침</button>
-            <button class="btn-toggle-all" onclick="toggleSelectAll()">전체 선택/해제</button>
-        </div>
-
-        <div id="deviceContainer" class="device-list">
-            <div style="color: #666; font-size: 12px; text-align: center; padding: 20px;">기기 목록을 불러오는 중...</div>
-        </div>
-    </div>
-
-    <!-- 우측: 우편 발송 패널 -->
-    <div class="glass-card">
-        <h2>SEND POSTAL MAIL</h2>
-        <p class="sub">선택된 기기(들) 또는 전체 사용자에게 우편을 발송합니다.</p>
-
-        <div class="field">
-            <label>수신 대상 모드</label>
-            <select id="targetType" onchange="toggleTargetInput()">
-                <option value="SELECTED">좌측 체크된 기기 일괄 발송 (<span id="selectedCountText">0</span>개 선택됨)</option>
-                <option value="ALL">전체 사용자 (ALL)</option>
-                <option value="CUSTOM">직접 8자리 코드 입력</option>
-            </select>
-        </div>
-
-        <div class="field" id="customTargetField" style="display: none;">
-            <label>수신 기기 8자리 코드</label>
-            <input type="text" id="targetDeviceId" placeholder="예: 7B2F89A1" maxlength="8">
-        </div>
-
-        <div class="field">
-            <label>우편 제목</label>
-            <input type="text" id="mailTitle" placeholder="우편 제목">
-        </div>
-
-        <div class="field">
-            <label>우편 본문 내용</label>
-            <textarea id="mailContent" placeholder="발송할 메시지 내용...&#10;버튼 예시: [상점으로 이동](https://web.black-market.store/shop)&#10;이미지 링크를 넣으면 사진이 자동 표시됩니다."></textarea>
-            
-            <div class="guide-box">
-                💡 <b>버튼 & 이미지 작성 팁:</b><br>
-                • <b>링크 버튼</b>: <code>[버튼이름](https://...)</code> 형식으로 쓰면 앱에서 터치 시 우편함이 닫히며 메인 웹뷰로 즉시 이동합니다.<br>
-                • <b>이미지</b>: <code>https://...png</code> 또는 <code>jpg</code> 링크를 단독 입력하면 카드로 표시됩니다.
-            </div>
-        </div>
-
-        <button class="btn" onclick="sendMail()">우편 일괄 발송하기</button>
-        <div id="statusBox" class="status"></div>
-    </div>
-</div>
-
-<script>
-    const SUPABASE_URL = "https://xirtaynusdyvtntlodpz.supabase.co";
-    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhpcnRheW51c2R5dnRudGxvZHB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2MTQ5NTUsImV4cCI6MjEwNDE5MDk1NX0.RCiocVn7PZQnWHnyN8tGQ08AV5M5ZbvvIKB6-eQRseI";
-
-    const { createClient } = supabase;
-    const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-    let allDevicesList = [];
-
-    function toggleTargetInput() {
-        const type = document.getElementById('targetType').value;
-        document.getElementById('customTargetField').style.display = (type === 'CUSTOM') ? 'block' : 'none';
+    static func getEncryptedShortId() -> String {
+        let rawUUID = UIDevice.current.identifierForVendor?.uuidString ?? "FALLBACK-DEVICE"
+        let salted = rawUUID + salt
+        let digest = SHA256.hash(data: Data(salted.utf8))
+        let hexString = digest.map { String(format: "%02X", $0) }.joined()
+        return String(hexString.prefix(8))
     }
 
-    function updateSelectedCount() {
-        const checked = document.querySelectorAll('.device-checkbox:checked');
-        const selectElem = document.getElementById('targetType');
-        selectElem.options[0].text = `좌측 체크된 기기 일괄 발송 (${checked.length}개 선택됨)`;
+    static func getDeviceModelName() -> String {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        let machineMirror = Mirror(reflecting: systemInfo.machine)
+        let identifier = machineMirror.children.reduce("") { identifier, element in
+            guard let value = element.value as? Int8, value != 0 else { return identifier }
+            return identifier + String(UnicodeScalar(UInt8(value)))
+        }
+
+        switch identifier {
+        case "iPhone14,2": return "iPhone 13 Pro"
+        case "iPhone14,3": return "iPhone 13 Pro Max"
+        case "iPhone14,4": return "iPhone 13 mini"
+        case "iPhone14,5": return "iPhone 13"
+        case "iPhone14,7": return "iPhone 14"
+        case "iPhone14,8": return "iPhone 14 Plus"
+        case "iPhone15,2": return "iPhone 14 Pro"
+        case "iPhone15,3": return "iPhone 14 Pro Max"
+        case "iPhone15,4": return "iPhone 15"
+        case "iPhone15,5": return "iPhone 15 Plus"
+        case "iPhone16,1": return "iPhone 15 Pro"
+        case "iPhone16,2": return "iPhone 15 Pro Max"
+        default: return UIDevice.current.model
+        }
     }
 
-    function toggleSelectAll() {
-        const checkboxes = document.querySelectorAll('.device-checkbox');
-        if (checkboxes.length === 0) return;
-        const anyUnchecked = Array.from(checkboxes).some(cb => !cb.checked);
-        checkboxes.forEach(cb => cb.checked = anyUnchecked);
-        updateSelectedCount();
+    static func syncDeviceToServer() {
+        guard let url = URL(string: "\(supabaseUrl)/rest/v1/devices") else { return }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        let nowStr = formatter.string(from: Date())
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        req.setValue("resolution=merge-duplicates", forHTTPHeaderField: "Prefer")
+
+        let body: [String: String] = [
+            "device_id": getEncryptedShortId(),
+            "device_name": getDeviceModelName(),
+            "last_seen": nowStr
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        URLSession.shared.dataTask(with: req).resume()
     }
+}
 
-    // Supabase 기기 목록 로드
-    async function loadDevices() {
-        const container = document.getElementById('deviceContainer');
-        container.innerHTML = '<div style="color: #666; font-size: 12px; text-align: center; padding: 20px;">기기 목록을 확인 중...</div>';
+// MARK: - AppDelegate
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    static var deviceTokenString: String?
 
-        try {
-            const { data, error } = await db.from('devices').select('*').order('last_seen', { ascending: false });
-            if (error) throw error;
-
-            allDevicesList = data || [];
-
-            if (allDevicesList.length === 0) {
-                container.innerHTML = `
-                    <div style="color: #888; font-size: 12px; text-align: center; padding: 25px; line-height: 1.6;">
-                        <b style="color: #60a5fa;">Supabase 연결 성공!</b><br>
-                        등록된 기기가 없습니다.<br>
-                        앱을 1회 실행하면 기기가 자동 등록됩니다.
-                    </div>`;
-                updateSelectedCount();
-                return;
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
+            if granted {
+                DispatchQueue.main.async {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
             }
+        }
+        DeviceIdManager.syncDeviceToServer()
+        return true
+    }
 
-            container.innerHTML = '';
-            allDevicesList.forEach(d => {
-                const item = document.createElement('div');
-                item.className = 'device-item';
-                item.innerHTML = `
-                    <input type="checkbox" class="device-checkbox" value="${d.device_id}" onchange="updateSelectedCount()">
-                    <div class="device-info">
-                        <div class="name">${d.device_name || 'iPhone'}</div>
-                        <div class="code">${d.device_id}</div>
-                        <div class="time">최근 접속: ${d.last_seen || '-'}</div>
-                    </div>
-                `;
-                // 항목 클릭 시 체크박스 토글
-                item.addEventListener('click', (e) => {
-                    if (e.target.tagName !== 'INPUT') {
-                        const cb = item.querySelector('.device-checkbox');
-                        cb.checked = !cb.checked;
-                        updateSelectedCount();
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
+        AppDelegate.deviceTokenString = token
+    }
+}
+
+// MARK: - 메인 앱
+@main
+struct BlackMarketApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @State private var currentURL: URL = URL(string: "https://web.black-market.store")!
+    @State private var isLoading: Bool = true
+    @State private var showInfoSheet: Bool = false
+    @State private var showMailSheet: Bool = false
+    
+    @State private var canGoBack: Bool = false
+    @State private var canGoForward: Bool = false
+    @State private var webAction: WebAction = .none
+
+    enum WebAction {
+        case none
+        case goBack
+        case goForward
+        case reload
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            GeometryReader { geometry in
+                ZStack(alignment: .bottom) {
+                    Color.black.edgesIgnoringSafeArea(.all)
+
+                    VStack(spacing: 0) {
+                        Color.black.frame(height: geometry.safeAreaInsets.top)
+                        WebViewContainer(
+                            url: currentURL,
+                            isLoading: $isLoading,
+                            canGoBack: $canGoBack,
+                            canGoForward: $canGoForward,
+                            webAction: $webAction
+                        )
                     }
-                });
-                container.appendChild(item);
-            });
-            updateSelectedCount();
-        } catch (e) {
-            container.innerHTML = `<div style="color: #ef4444; font-size: 12px; text-align: center; padding: 20px;">${e.message || e}</div>`;
-        }
-    }
+                    .edgesIgnoringSafeArea(.all)
 
-    // 우편 발송 (다중 선택 일괄 전송 지원)
-    async function sendMail() {
-        const targetType = document.getElementById('targetType').value;
-        const title = document.getElementById('mailTitle').value.trim();
-        const content = document.getElementById('mailContent').value.trim();
+                    LiquidGlassNavigationBar(
+                        canGoBack: canGoBack,
+                        canGoForward: canGoForward,
+                        onBack: { webAction = .goBack },
+                        onForward: { webAction = .goForward },
+                        onReload: { webAction = .reload },
+                        onMail: { showMailSheet = true },
+                        onInfo: { showInfoSheet = true }
+                    )
+                    .padding(.bottom, max(geometry.safeAreaInsets.bottom, 16) + 28)
+                    .padding(.horizontal, 20)
 
-        if (!title || !content) {
-            showStatus('우편 제목과 내용을 모두 입력해주세요.', false);
-            return;
-        }
-
-        let targetIds = [];
-
-        if (targetType === 'ALL') {
-            targetIds = ['ALL'];
-        } else if (targetType === 'CUSTOM') {
-            const singleId = document.getElementById('targetDeviceId').value.trim().toUpperCase();
-            if (!singleId) {
-                showStatus('수신 기기 식별코드를 입력해주세요.', false);
-                return;
+                    if isLoading {
+                        CustomLoadingOverlay()
+                            .transition(.opacity.animation(.easeOut(duration: 0.2)))
+                            .zIndex(2)
+                    }
+                }
             }
-            targetIds = [singleId];
-        } else {
-            // SELECTED (체크된 기기들)
-            const checkedBoxes = document.querySelectorAll('.device-checkbox:checked');
-            if (checkedBoxes.length === 0) {
-                showStatus('좌측 목록에서 최소 1대 이상의 기기를 체크해주세요.', false);
-                return;
+            .sheet(isPresented: $showInfoSheet) {
+                AppInfoView(onEasterEggTriggered: {
+                    showInfoSheet = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        if let easterEggURL = URL(string: "https://cdn.mtdv.me/video/rick.mp4") {
+                            self.currentURL = easterEggURL
+                        }
+                    }
+                })
             }
-            targetIds = Array.from(checkedBoxes).map(cb => cb.value);
+            .sheet(isPresented: $showMailSheet) {
+                // 우편 내부 버튼 클릭 시 웹뷰 URL 이동 및 창 닫기 처리
+                MailboxView(onNavigateURL: { targetURL in
+                    showMailSheet = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        self.currentURL = targetURL
+                    }
+                })
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    withAnimation { self.isLoading = false }
+                }
+            }
+            .onOpenURL { url in
+                if let host = url.host, !host.isEmpty {
+                    if let targetURL = URL(string: "https://web.black-market.store/\(host)") {
+                        self.currentURL = targetURL
+                    }
+                }
+            }
         }
+    }
+}
 
-        showStatus(`우편 발송 중... (총 ${targetIds.length}개 대상)`, true);
+// MARK: - 하단 리퀴드 글래스 컨트롤 바
+struct LiquidGlassNavigationBar: View {
+    let canGoBack: Bool
+    let canGoForward: Bool
+    let onBack: () -> Void
+    let onForward: () -> Void
+    let onReload: () -> Void
+    let onMail: () -> Void
+    let onInfo: () -> Void
 
-        const today = new Date().toISOString().split('T')[0];
-        
-        // Supabase 배치 인서트 레코드 구성
-        const insertRows = targetIds.map(id => ({
-            target_device_id: id,
-            title: title,
-            content: content,
-            date: today
-        }));
+    var body: some View {
+        HStack(spacing: 24) {
+            Button(action: onBack) {
+                Image(systemName: "chevron.backward")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(canGoBack ? .white : .white.opacity(0.25))
+            }
+            .disabled(!canGoBack)
 
-        const { error } = await db.from('inbox').insert(insertRows);
+            Button(action: onForward) {
+                Image(systemName: "chevron.forward")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(canGoForward ? .white : .white.opacity(0.25))
+            }
+            .disabled(!canGoForward)
 
-        if (error) {
-            showStatus('발송 실패: ' + error.message, false);
-        } else {
-            showStatus(`총 ${targetIds.length}건의 우편이 성공적으로 발송되었습니다!`, true);
-            document.getElementById('mailTitle').value = '';
-            document.getElementById('mailContent').value = '';
+            Divider()
+                .frame(width: 1, height: 16)
+                .background(Color.white.opacity(0.2))
+
+            Button(action: onReload) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.85))
+            }
+
+            Button(action: onMail) {
+                Image(systemName: "envelope.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.85))
+            }
+
+            Button(action: onInfo) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.white.opacity(0.85))
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 12)
+        .background(
+            ZStack {
+                BlurView(style: .systemUltraThinMaterialDark)
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.white.opacity(0.18),
+                        Color.white.opacity(0.04),
+                        Color.clear
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
+        )
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.6),
+                            Color.white.opacity(0.1),
+                            Color.white.opacity(0.05),
+                            Color.white.opacity(0.25)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 0.8
+                )
+        )
+        .shadow(color: Color.black.opacity(0.4), radius: 18, x: 0, y: 8)
+    }
+}
+
+// MARK: - 앱 정보 모달 (방패 6번 터치 이스터에그)
+struct AppInfoView: View {
+    @Environment(\.presentationMode) var presentationMode
+    var onEasterEggTriggered: (() -> Void)? = nil
+
+    @State private var dragRotationX: Double = 0
+    @State private var dragRotationY: Double = 0
+    @State private var tapCount: Int = 0
+    @State private var lastTapTime: Date = Date()
+
+    var appVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0" }
+    var buildNumber: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1" }
+
+    var body: some View {
+        ZStack {
+            Color(red: 0.05, green: 0.05, blue: 0.07).edgesIgnoringSafeArea(.all)
+
+            VStack(spacing: 24) {
+                Capsule()
+                    .fill(Color.white.opacity(0.25))
+                    .frame(width: 36, height: 4)
+                    .padding(.top, 12)
+
+                VStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.15), Color.white.opacity(0.03)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 80, height: 80)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                    .stroke(Color.white.opacity(0.35), lineWidth: 1)
+                            )
+                            .shadow(color: Color.blue.opacity(0.2), radius: 15, x: 0, y: 5)
+                        
+                        Image(systemName: "shield.lefthalf.filled")
+                            .font(.system(size: 38))
+                            .foregroundColor(.white)
+                    }
+                    .rotation3DEffect(.degrees(dragRotationX), axis: (x: 1.0, y: 0.0, z: 0.0))
+                    .rotation3DEffect(.degrees(dragRotationY), axis: (x: 0.0, y: 1.0, z: 0.0))
+                    .onTapGesture {
+                        let now = Date()
+                        if now.timeIntervalSince(lastTapTime) > 1.2 {
+                            tapCount = 1
+                        } else {
+                            tapCount += 1
+                        }
+                        lastTapTime = now
+
+                        let generator = UIImpactFeedbackGenerator(style: .light)
+                        generator.impactOccurred()
+
+                        if tapCount >= 6 {
+                            tapCount = 0
+                            let heavyGenerator = UINotificationFeedbackGenerator()
+                            heavyGenerator.notificationOccurred(.success)
+                            onEasterEggTriggered?()
+                        }
+                    }
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                withAnimation(.interactiveSpring()) {
+                                    dragRotationY = Double(value.translation.width) * 0.8
+                                    dragRotationX = -Double(value.translation.height) * 0.8
+                                }
+                            }
+                            .onEnded { _ in
+                                withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
+                                    dragRotationX = 0
+                                    dragRotationY = 0
+                                }
+                            }
+                    )
+
+                    Text("BLACK MARKET")
+                        .font(.system(size: 18, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+                        .tracking(2)
+
+                    Text("방패를 손가락으로 드래그하여 회전시켜보세요")
+                        .font(.system(size: 11))
+                        .foregroundColor(.gray.opacity(0.8))
+                }
+                .padding(.top, 4)
+
+                VStack(spacing: 14) {
+                    infoRow(title: "애플리케이션 버전", value: "v\(appVersion)")
+                    Divider().background(Color.white.opacity(0.1))
+                    infoRow(title: "빌드 번호", value: "Build #\(buildNumber)")
+                    Divider().background(Color.white.opacity(0.1))
+                    infoRow(title: "기기 식별 모델", value: DeviceIdManager.getDeviceModelName())
+                    Divider().background(Color.white.opacity(0.1))
+                    infoRow(title: "생체인증 패스키", value: "비활성화됨")
+                    Divider().background(Color.white.opacity(0.1))
+                    infoRow(title: "보안 샌드박스", value: "TLS 1.3 암호화")
+                }
+                .padding(18)
+                .background(
+                    ZStack {
+                        BlurView(style: .systemThinMaterialDark)
+                        Color.white.opacity(0.03)
+                    }
+                )
+                .cornerRadius(18)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18)
+                        .stroke(Color.white.opacity(0.15), lineWidth: 0.8)
+                )
+                .padding(.horizontal, 20)
+
+                Spacer()
+
+                Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                    Text("닫기")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(14)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 0.8)
+                        )
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+            }
         }
     }
 
-    function showStatus(text, isOk) {
-        const box = document.getElementById('statusBox');
-        box.style.display = 'block';
-        box.className = 'status ' + (isOk ? 'success' : 'error');
-        box.innerText = text;
+    func infoRow(title: String, value: String) -> some View {
+        HStack {
+            Text(title).font(.system(size: 13)).foregroundColor(.gray)
+            Spacer()
+            Text(value).font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .foregroundColor(value == "비활성화됨" ? Color.red.opacity(0.8) : .white)
+        }
+    }
+}
+
+// MARK: - 우편 본문 파싱 뷰 (이미지 및 [버튼명](링크) 버튼 렌더링)
+struct MailContentView: View {
+    let content: String
+    let onNavigateURL: ((URL) -> Void)?
+
+    struct ActionLink: Identifiable {
+        let id = UUID()
+        let title: String
+        let url: URL
     }
 
-    window.onload = () => { loadDevices(); };
-</script>
-</body>
-</html>
+    // [버튼내용](링크) 파싱
+    var parsedButtons: [ActionLink] {
+        let pattern = "\\[([^\\]]+)\\]\\((https?://[^\\)]+)\\)"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        let nsString = content as NSString
+        let matches = regex.matches(in: content, options: [], range: NSRange(location: 0, length: nsString.length))
+
+        return matches.compactMap { match in
+            guard match.numberOfRanges == 3 else { return nil }
+            let title = nsString.substring(with: match.range(at: 1))
+            let urlString = nsString.substring(with: match.range(at: 2))
+            if let url = URL(string: urlString) {
+                return ActionLink(title: title, url: url)
+            }
+            return nil
+        }
+    }
+
+    // 본문 중 이미지 URL 추출
+    var imageURLs: [URL] {
+        let pattern = "(https?://[^\\s]+\\.(?:png|jpg|jpeg|gif|webp))"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
+        let nsString = content as NSString
+        let matches = regex.matches(in: content, options: [], range: NSRange(location: 0, length: nsString.length))
+
+        return matches.compactMap { match in
+            let urlString = nsString.substring(with: match.range)
+            return URL(string: urlString)
+        }
+    }
+
+    // [버튼명](링크) 및 이미지 단독 URL 문구를 제거한 순수 텍스트 본문
+    var cleanedText: String {
+        var text = content
+        text = text.replacingOccurrences(of: "\\[([^\\]]+)\\]\\((https?://[^\\)]+)\\)", with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: "(https?://[^\\s]+\\.(?:png|jpg|jpeg|gif|webp))", with: "", options: .regularExpression)
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !cleanedText.isEmpty {
+                Text(cleanedText)
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.85))
+                    .lineSpacing(3)
+            }
+
+            // 우편에 포함된 이미지 렌더링
+            ForEach(imageURLs, id: \.self) { imgURL in
+                AsyncImage(url: imgURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable()
+                            .scaledToFit()
+                            .cornerRadius(10)
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.15), lineWidth: 0.8))
+                    case .failure(_):
+                        EmptyView()
+                    case .empty:
+                        ProgressView().colorScheme(.dark).frame(height: 100)
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+            }
+
+            // 우편 본문에서 추출된 [버튼명](링크) 버튼들
+            if !parsedButtons.isEmpty {
+                VStack(spacing: 8) {
+                    ForEach(parsedButtons) { btn in
+                        Button(action: {
+                            onNavigateURL?(btn.url)
+                        }) {
+                            HStack {
+                                Text(btn.title)
+                                    .font(.system(size: 13, weight: .bold))
+                                Image(systemName: "arrow.up.forward.app")
+                                    .font(.system(size: 12))
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(
+                                LinearGradient(
+                                    colors: [Color.blue.opacity(0.85), Color.blue],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .cornerRadius(8)
+                            .shadow(color: Color.blue.opacity(0.3), radius: 6, x: 0, y: 3)
+                        }
+                    }
+                }
+                .padding(.top, 4)
+            }
+        }
+    }
+}
+
+// MARK: - 우편함 모달
+struct MailboxView: View {
+    @Environment(\.presentationMode) var presentationMode
+    var onNavigateURL: ((URL) -> Void)? = nil
+
+    @State private var mails: [MailItem] = []
+    @State private var isFetching = true
+    @State private var copySuccess = false
+
+    var shortDeviceId: String { DeviceIdManager.getEncryptedShortId() }
+    var deviceModelName: String { DeviceIdManager.getDeviceModelName() }
+
+    var body: some View {
+        ZStack {
+            Color(red: 0.05, green: 0.05, blue: 0.07).edgesIgnoringSafeArea(.all)
+
+            VStack(spacing: 16) {
+                Capsule()
+                    .fill(Color.white.opacity(0.25))
+                    .frame(width: 36, height: 4)
+                    .padding(.top, 12)
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("우편함")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.white)
+                        Text("새로운 공지 및 개별 메시지를 확인합니다.")
+                            .font(.system(size: 12))
+                            .foregroundColor(.gray)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text(deviceModelName)
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.blue)
+                        Spacer()
+                        Button(action: {
+                            UIPasteboard.general.string = shortDeviceId
+                            copySuccess = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copySuccess = false }
+                        }) {
+                            Text(copySuccess ? "복사됨!" : "번호 복사")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(copySuccess ? .green : .blue)
+                        }
+                    }
+                    Text(shortDeviceId)
+                        .font(.system(size: 17, weight: .black, design: .monospaced))
+                        .foregroundColor(.white)
+                        .tracking(3)
+                }
+                .padding(14)
+                .background(Color.white.opacity(0.04))
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
+                )
+                .padding(.horizontal, 20)
+
+                if isFetching {
+                    Spacer()
+                    ProgressView().colorScheme(.dark)
+                    Spacer()
+                } else if mails.isEmpty {
+                    Spacer()
+                    VStack(spacing: 8) {
+                        Image(systemName: "tray")
+                            .font(.system(size: 36))
+                            .foregroundColor(.gray.opacity(0.5))
+                        Text("받은 우편이 없습니다.")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                    }
+                    Spacer()
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(mails) { mail in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Text(mail.title)
+                                            .font(.system(size: 15, weight: .bold))
+                                            .foregroundColor(.white)
+                                        Spacer()
+                                        Text(mail.date)
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.gray)
+                                    }
+
+                                    // 이미지와 버튼이 지원되는 본문 렌더러
+                                    MailContentView(content: mail.content, onNavigateURL: onNavigateURL)
+                                }
+                                .padding(16)
+                                .background(
+                                    ZStack {
+                                        BlurView(style: .systemThinMaterialDark)
+                                        Color.white.opacity(0.03)
+                                    }
+                                )
+                                .cornerRadius(14)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
+                                )
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                }
+
+                Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                    Text("닫기")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(14)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 0.8)
+                        )
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+            }
+        }
+        .onAppear { fetchMails() }
+    }
+
+    func fetchMails() {
+        let queryUrlStr = "\(DeviceIdManager.supabaseUrl)/rest/v1/inbox?select=*&order=id.desc&or=(target_device_id.eq.ALL,target_device_id.eq.\(shortDeviceId))"
+        guard let url = URL(string: queryUrlStr) else {
+            self.isFetching = false
+            return
+        }
+
+        var req = URLRequest(url: url)
+        req.setValue(DeviceIdManager.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(DeviceIdManager.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+
+        URLSession.shared.dataTask(with: req) { data, _, _ in
+            DispatchQueue.main.async {
+                self.isFetching = false
+                guard let data = data,
+                      let decoded = try? JSONDecoder().decode([MailItem].self, from: data) else {
+                    return
+                }
+                self.mails = decoded
+            }
+        }.resume()
+    }
+}
+
+// MARK: - UIKit 블러 뷰
+struct BlurView: UIViewRepresentable {
+    let style: UIBlurEffect.Style
+    func makeUIView(context: Context) -> UIVisualEffectView { UIVisualEffectView(effect: UIBlurEffect(style: style)) }
+    func updateUIView(_ uiView: UIVisualEffectView, context: Context) { uiView.effect = UIBlurEffect(style: style) }
+}
+
+// MARK: - 웹뷰
+struct WebViewContainer: UIViewRepresentable {
+    let url: URL
+    @Binding var isLoading: Bool
+    @Binding var canGoBack: Bool
+    @Binding var canGoForward: Bool
+    @Binding var webAction: BlackMarketApp.WebAction
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let prefs = WKWebpagePreferences()
+        prefs.allowsContentJavaScript = true
+
+        let config = WKWebViewConfiguration()
+        config.defaultWebpagePreferences = prefs
+        config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
+        config.websiteDataStore = WKWebsiteDataStore.default()
+
+        let preferences = WKPreferences()
+        preferences.javaScriptCanOpenWindowsAutomatically = true
+        config.preferences = preferences
+
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
+        webView.backgroundColor = .black
+        webView.isOpaque = false
+        webView.scrollView.bounces = true
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
+
+        context.coordinator.setupProgressObserver(for: webView)
+        context.coordinator.setupHistoryObserver(for: webView)
+
+        let request = URLRequest(url: url)
+        webView.load(request)
+        return webView
+    }
+
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        if let current = uiView.url, current != url {
+            uiView.load(URLRequest(url: url))
+        }
+
+        switch webAction {
+        case .goBack:
+            if uiView.canGoBack { uiView.goBack() }
+            DispatchQueue.main.async { self.webAction = .none }
+        case .goForward:
+            if uiView.canGoForward { uiView.goForward() }
+            DispatchQueue.main.async { self.webAction = .none }
+        case .reload:
+            uiView.reload()
+            DispatchQueue.main.async { self.webAction = .none }
+        case .none:
+            break
+        }
+    }
+
+    class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+        var parent: WebViewContainer
+        private var progressObservation: NSKeyValueObservation?
+        private var backObservation: NSKeyValueObservation?
+        private var forwardObservation: NSKeyValueObservation?
+        private var downloadedFileURLs: [ObjectIdentifier: URL] = [:]
+
+        init(_ parent: WebViewContainer) { self.parent = parent }
+
+        func setupProgressObserver(for webView: WKWebView) {
+            progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] webView, _ in
+                if webView.estimatedProgress >= 0.3 {
+                    DispatchQueue.main.async {
+                        self?.parent.isLoading = false
+                    }
+                }
+            }
+        }
+
+        func setupHistoryObserver(for webView: WKWebView) {
+            backObservation = webView.observe(\.canGoBack, options: [.new]) { [weak self] webView, _ in
+                DispatchQueue.main.async {
+                    self?.parent.canGoBack = webView.canGoBack
+                }
+            }
+            forwardObservation = webView.observe(\.canGoForward, options: [.new]) { [weak self] webView, _ in
+                DispatchQueue.main.async {
+                    self?.parent.canGoForward = webView.canGoForward
+                }
+            }
+        }
+
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            DispatchQueue.main.async { self.parent.isLoading = false }
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            DispatchQueue.main.async {
+                self.parent.isLoading = false
+                self.parent.canGoBack = webView.canGoBack
+                self.parent.canGoForward = webView.canGoForward
+            }
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            DispatchQueue.main.async { self.parent.isLoading = false }
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            DispatchQueue.main.async { self.parent.isLoading = false }
+        }
+
+        func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+            if navigationAction.targetFrame == nil {
+                webView.load(navigationAction.request)
+            }
+            return nil
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            guard let reqURL = navigationAction.request.url else {
+                decisionHandler(.allow)
+                return
+            }
+
+            let scheme = reqURL.scheme?.lowercased() ?? ""
+            if scheme != "http" && scheme != "https" && scheme != "about" {
+                if UIApplication.shared.canOpenURL(reqURL) {
+                    UIApplication.shared.open(reqURL, options: [:], completionHandler: nil)
+                    decisionHandler(.cancel)
+                    return
+                }
+            }
+
+            let fileExtensions = ["zip", "ipa", "pdf", "apk", "rar", "7z", "txt", "png", "jpg", "jpeg"]
+            if fileExtensions.contains(reqURL.pathExtension.lowercased()) {
+                if #available(iOS 14.5, *) {
+                    decisionHandler(.download)
+                    return
+                }
+            }
+
+            decisionHandler(.allow)
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            if let response = navigationResponse.response as? HTTPURLResponse {
+                let disposition = response.allHeaderFields["Content-Disposition"] as? String ?? ""
+                if disposition.contains("attachment") {
+                    if #available(iOS 14.5, *) {
+                        decisionHandler(.download)
+                        return
+                    }
+                }
+            }
+            decisionHandler(.allow)
+        }
+
+        @available(iOS 14.5, *)
+        func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+            download.delegate = self
+        }
+
+        @available(iOS 14.5, *)
+        func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+            download.delegate = self
+        }
+
+        @available(iOS 14.5, *)
+        func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+            let tempDir = FileManager.default.temporaryDirectory
+            let destinationURL = tempDir.appendingPathComponent(suggestedFilename)
+            try? FileManager.default.removeItem(at: destinationURL)
+            let downloadId = ObjectIdentifier(download)
+            self.downloadedFileURLs[downloadId] = destinationURL
+            completionHandler(destinationURL)
+        }
+
+        @available(iOS 14.5, *)
+        func downloadDidFinish(_ download: WKDownload) {
+            let downloadId = ObjectIdentifier(download)
+            guard let fileURL = self.downloadedFileURLs[downloadId] else { return }
+            self.downloadedFileURLs.removeValue(forKey: downloadId)
+
+            DispatchQueue.main.async {
+                let activityVC = UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
+                if let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+                   let rootVC = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController {
+                    activityVC.popoverPresentationController?.sourceView = rootVC.view
+                    rootVC.present(activityVC, animated: true)
+                }
+            }
+        }
+
+        @available(iOS 14.5, *)
+        func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+            let downloadId = ObjectIdentifier(download)
+            self.downloadedFileURLs.removeValue(forKey: downloadId)
+        }
+    }
+}
+
+// MARK: - 로딩 오버레이
+struct CustomLoadingOverlay: View {
+    @State private var isPulsing = false
+    @State private var rotateDegree: Double = 0
+
+    var body: some View {
+        ZStack {
+            Color.black.edgesIgnoringSafeArea(.all)
+            VStack(spacing: 20) {
+                ZStack {
+                    Circle()
+                        .stroke(
+                            LinearGradient(colors: [Color.white.opacity(0.8), Color.gray.opacity(0.2)], startPoint: .topLeading, endPoint: .bottomTrailing),
+                            lineWidth: 2.5
+                        )
+                        .frame(width: 76, height: 76)
+                        .rotationEffect(.degrees(rotateDegree))
+                        .scaleEffect(isPulsing ? 1.03 : 0.97)
+
+                    VStack(spacing: 1) {
+                        Text("BLACK").font(.system(size: 14, weight: .heavy, design: .monospaced)).foregroundColor(.white).tracking(2.5)
+                        Text("MARKET").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundColor(.gray).tracking(1.8)
+                    }
+                }
+                Text("CONNECTING...").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundColor(.gray.opacity(0.8)).tracking(2)
+            }
+        }
+        .onAppear {
+            withAnimation(.linear(duration: 1.0).repeatForever(autoreverses: false)) { rotateDegree = 360 }
+            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) { isPulsing = true }
+        }
+    }
+}
