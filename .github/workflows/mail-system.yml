@@ -1,0 +1,86 @@
+name: Mail & Device Automation
+
+on:
+  repository_dispatch:
+    types: [register_device, send_mail]
+
+permissions:
+  contents: write
+
+jobs:
+  process_event:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p mail
+
+      # 기기 등록 이벤트 처리
+      - name: Register Device
+        if: github.event.action == 'register_device'
+        run: |
+          DEVICE_ID="${{ github.event.client_payload.device_id }}"
+          DEVICE_NAME="${{ github.event.client_payload.device_name }}"
+          NOW=$(date -u +"%Y-%m-%d %H:%M")
+
+          node -e '
+            const fs = require("fs");
+            const file = "mail/devices.json";
+            let data = { devices: [] };
+            if (fs.existsSync(file)) {
+              try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch(e){}
+            }
+            if (!Array.isArray(data.devices)) data.devices = [];
+            
+            data.devices = data.devices.filter(d => d.device_id !== "'"$DEVICE_ID"'");
+            data.devices.unshift({
+              device_id: "'"$DEVICE_ID"'",
+              device_name: "'"$DEVICE_NAME"'",
+              last_seen: "'"$NOW"'"
+            });
+            fs.writeFileSync(file, JSON.stringify(data, null, 2));
+          '
+
+          git add mail/devices.json
+          git commit -m "[Actions] Auto register device: $DEVICE_NAME ($DEVICE_ID)" || exit 0
+          git push origin main
+
+      # 우편 발송 이벤트 처리
+      - name: Send Mail
+        if: github.event.action == 'send_mail'
+        run: |
+          TARGET_ID="${{ github.event.client_payload.target_device_id }}"
+          TITLE="${{ github.event.client_payload.title }}"
+          CONTENT="${{ github.event.client_payload.content }}"
+          TODAY=$(date -u +"%Y-%m-%d")
+          MAIL_ID=$(date +%s%N | cut -b1-13)
+
+          node -e '
+            const fs = require("fs");
+            const file = "mail/inbox.json";
+            let data = { mails: [] };
+            if (fs.existsSync(file)) {
+              try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch(e){}
+            }
+            if (!Array.isArray(data.mails)) data.mails = [];
+
+            data.mails.unshift({
+              id: Number("'"$MAIL_ID"'"),
+              target_device_id: "'"$TARGET_ID"'",
+              title: `'"$TITLE"'`,
+              content: `'"$CONTENT"'`,
+              date: "'"$TODAY"'"
+            });
+            fs.writeFileSync(file, JSON.stringify(data, null, 2));
+          '
+
+          git add mail/inbox.json
+          git commit -m "[Actions] Dispatch mail to $TARGET_ID" || exit 0
+          git push origin main
