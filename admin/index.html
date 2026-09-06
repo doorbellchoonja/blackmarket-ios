@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Black Market - Mail & Device Admin (Supabase)</title>
-    <!-- Supabase JS 라이브러리 -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; }
@@ -98,28 +97,24 @@
         .device-info .code { font-size: 12px; font-family: monospace; color: #60a5fa; font-weight: 800; letter-spacing: 1px; margin-top: 2px; }
         .device-info .time { font-size: 10px; color: #666; margin-top: 2px; }
 
-        .guide-box {
-            background: rgba(59, 130, 246, 0.08);
-            border: 1px dashed rgba(59, 130, 246, 0.3);
-            border-radius: 10px;
-            padding: 10px 12px;
-            margin-top: 6px;
-            font-size: 11px;
-            color: #93c5fd;
-            line-height: 1.5;
+        .upload-row { display: flex; gap: 8px; margin-top: 6px; align-items: center; }
+        .file-label {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-block;
         }
-        .guide-box code {
-            background: rgba(0,0,0,0.4);
-            padding: 2px 4px;
-            border-radius: 4px;
-            color: #fff;
-        }
+        .file-label:hover { background: rgba(255, 255, 255, 0.15); }
+        .upload-status { font-size: 11px; color: #60a5fa; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <!-- 좌측: 기기 목록 패널 (다중 체크박스 선택) -->
     <div class="glass-card">
         <h2>INSTALLED DEVICES</h2>
         <p class="sub">체크박스를 통해 여러 기기를 선택하여 일괄 발송할 수 있습니다.</p>
@@ -134,7 +129,6 @@
         </div>
     </div>
 
-    <!-- 우측: 우편 발송 패널 -->
     <div class="glass-card">
         <h2>SEND POSTAL MAIL</h2>
         <p class="sub">선택된 기기(들) 또는 전체 사용자에게 우편을 발송합니다.</p>
@@ -142,7 +136,7 @@
         <div class="field">
             <label>수신 대상 모드</label>
             <select id="targetType" onchange="toggleTargetInput()">
-                <option value="SELECTED">좌측 체크된 기기 일괄 발송 (<span id="selectedCountText">0</span>개 선택됨)</option>
+                <option value="SELECTED">좌측 체크된 기기 일괄 발송 (0개 선택됨)</option>
                 <option value="ALL">전체 사용자 (ALL)</option>
                 <option value="CUSTOM">직접 8자리 코드 입력</option>
             </select>
@@ -150,7 +144,7 @@
 
         <div class="field" id="customTargetField" style="display: none;">
             <label>수신 기기 8자리 코드</label>
-            <input type="text" id="targetDeviceId" placeholder="예: 7B2F89A1" maxlength="8">
+            <input type="text" id="targetDeviceId" placeholder="예: AC5BAB1F" maxlength="8">
         </div>
 
         <div class="field">
@@ -159,14 +153,17 @@
         </div>
 
         <div class="field">
-            <label>우편 본문 내용</label>
-            <textarea id="mailContent" placeholder="발송할 메시지 내용...&#10;버튼 예시: [상점으로 이동](https://web.black-market.store/shop)&#10;이미지 링크를 넣으면 사진이 자동 표시됩니다."></textarea>
-            
-            <div class="guide-box">
-                💡 <b>버튼 & 이미지 작성 팁:</b><br>
-                • <b>링크 버튼</b>: <code>[버튼이름](https://...)</code> 형식으로 쓰면 앱에서 터치 시 우편함이 닫히며 메인 웹뷰로 즉시 이동합니다.<br>
-                • <b>이미지</b>: <code>https://...png</code> 또는 <code>jpg</code> 링크를 단독 입력하면 카드로 표시됩니다.
+            <label>사진 직접 첨부</label>
+            <div class="upload-row">
+                <input type="file" id="imageInput" accept="image/*" style="display:none" onchange="handleImageUpload()">
+                <label for="imageInput" class="file-label">🖼️ 사진 파일 선택 및 업로드</label>
+                <span id="uploadStatus" class="upload-status"></span>
             </div>
+        </div>
+
+        <div class="field">
+            <label>우편 본문 내용</label>
+            <textarea id="mailContent" placeholder="발송할 내용...&#10;버튼 예: [공식몰 바로가기](https://web.black-market.store)"></textarea>
         </div>
 
         <button class="btn" onclick="sendMail()">우편 일괄 발송하기</button>
@@ -202,7 +199,6 @@
         updateSelectedCount();
     }
 
-    // Supabase 기기 목록 로드
     async function loadDevices() {
         const container = document.getElementById('deviceContainer');
         container.innerHTML = '<div style="color: #666; font-size: 12px; text-align: center; padding: 20px;">기기 목록을 확인 중...</div>';
@@ -236,7 +232,6 @@
                         <div class="time">최근 접속: ${d.last_seen || '-'}</div>
                     </div>
                 `;
-                // 항목 클릭 시 체크박스 토글
                 item.addEventListener('click', (e) => {
                     if (e.target.tagName !== 'INPUT') {
                         const cb = item.querySelector('.device-checkbox');
@@ -252,7 +247,38 @@
         }
     }
 
-    // 우편 발송 (다중 선택 일괄 전송 지원)
+    // 사진 파일 직접 업로드 처리 (ImgBB 익명 업로드)
+    async function handleImageUpload() {
+        const fileInput = document.getElementById('imageInput');
+        const statusSpan = document.getElementById('uploadStatus');
+        const file = fileInput.files[0];
+        if (!file) return;
+
+        statusSpan.innerText = '업로드 중...';
+
+        const formData = new FormData();
+        formData.append('image', file);
+
+        try {
+            const res = await fetch('https://api.imgbb.com/1/upload?key=6d207e02198a847aa5fb34a8a46fbac4', {
+                method: 'POST',
+                body: formData
+            });
+            const result = await res.json();
+            if (result.success) {
+                const imgURL = result.data.url;
+                const contentArea = document.getElementById('mailContent');
+                contentArea.value += (contentArea.value ? '\n' : '') + imgURL;
+                statusSpan.innerText = '업로드 완료!';
+                setTimeout(() => { statusSpan.innerText = ''; }, 3000);
+            } else {
+                statusSpan.innerText = '업로드 실패';
+            }
+        } catch (e) {
+            statusSpan.innerText = '업로드 오류 발생';
+        }
+    }
+
     async function sendMail() {
         const targetType = document.getElementById('targetType').value;
         const title = document.getElementById('mailTitle').value.trim();
@@ -275,7 +301,6 @@
             }
             targetIds = [singleId];
         } else {
-            // SELECTED (체크된 기기들)
             const checkedBoxes = document.querySelectorAll('.device-checkbox:checked');
             if (checkedBoxes.length === 0) {
                 showStatus('좌측 목록에서 최소 1대 이상의 기기를 체크해주세요.', false);
@@ -287,8 +312,6 @@
         showStatus(`우편 발송 중... (총 ${targetIds.length}개 대상)`, true);
 
         const today = new Date().toISOString().split('T')[0];
-        
-        // Supabase 배치 인서트 레코드 구성
         const insertRows = targetIds.map(id => ({
             target_device_id: id,
             title: title,
