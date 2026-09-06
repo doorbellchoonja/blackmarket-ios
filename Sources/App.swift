@@ -18,7 +18,7 @@ struct DeviceIdManager {
     private static let salt = "BM_DEVICE_SALT_2026"
 
     // ★ 본인의 Supabase Project URL 및 anon/public Key를 입력하세요
-    static let supabaseUrl = "https://xirtaynusdyvtntlodpz.supabase.co/rest/v1/"
+    static let supabaseUrl = "https://xirtaynusdyvtntlodpz.supabase.co/rest/v1"
     static let supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhpcnRheW51c2R5dnRudGxvZHB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2MTQ5NTUsImV4cCI6MjEwNDE5MDk1NX0.RCiocVn7PZQnWHnyN8tGQ08AV5M5ZbvvIKB6-eQRseI"
 
     static func getEncryptedShortId() -> String {
