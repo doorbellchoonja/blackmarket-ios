@@ -1,0 +1,5 @@
+CFBundleDisplayName = "Black Market";
+CFBundleName = "Black Market";
+NSFaceIDUsageDescription = "Biometric authentication is required for passkey login and identity verification.";
+NSPhotoLibraryAdditionsUsageDescription = "Permission is required to save photos and videos from the mailbox to your Photo Library.";
+NSPhotoLibraryUsageDescription = "Permission is required to access your Photo Library to save media from the mailbox.";
