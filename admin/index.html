@@ -97,7 +97,7 @@
         .device-info .code { font-size: 12px; font-family: monospace; color: #60a5fa; font-weight: 800; letter-spacing: 1px; margin-top: 2px; }
         .device-info .time { font-size: 10px; color: #666; margin-top: 2px; }
 
-        .upload-row { display: flex; gap: 8px; margin-top: 6px; align-items: center; }
+        .upload-row { display: flex; gap: 8px; margin-top: 6px; align-items: center; flex-wrap: wrap; }
         .file-label {
             background: rgba(255, 255, 255, 0.08);
             border: 1px solid rgba(255, 255, 255, 0.2);
@@ -109,7 +109,7 @@
             display: inline-block;
         }
         .file-label:hover { background: rgba(255, 255, 255, 0.15); }
-        .upload-status { font-size: 11px; color: #60a5fa; }
+        .upload-status { font-size: 12px; font-weight: 600; }
     </style>
 </head>
 <body>
@@ -153,7 +153,7 @@
         </div>
 
         <div class="field">
-            <label>사진 직접 첨부</label>
+            <label>사진 직접 첨부 (Supabase Storage)</label>
             <div class="upload-row">
                 <input type="file" id="imageInput" accept="image/*" style="display:none" onchange="handleImageUpload()">
                 <label for="imageInput" class="file-label">🖼️ 사진 파일 선택 및 업로드</label>
@@ -163,7 +163,7 @@
 
         <div class="field">
             <label>우편 본문 내용</label>
-            <textarea id="mailContent" placeholder="발송할 내용...&#10;버튼 예: [공식몰 바로가기](https://web.black-market.store)"></textarea>
+            <textarea id="mailContent" placeholder="발송할 내용...&#10;버튼 예: [공식몰 이동](https://web.black-market.store)"></textarea>
         </div>
 
         <button class="btn" onclick="sendMail()">우편 일괄 발송하기</button>
@@ -247,35 +247,42 @@
         }
     }
 
-    // 사진 파일 직접 업로드 처리 (ImgBB 익명 업로드)
+    // Supabase Storage로 직접 이미지 업로드
     async function handleImageUpload() {
         const fileInput = document.getElementById('imageInput');
         const statusSpan = document.getElementById('uploadStatus');
         const file = fileInput.files[0];
         if (!file) return;
 
+        statusSpan.style.color = '#60a5fa';
         statusSpan.innerText = '업로드 중...';
 
-        const formData = new FormData();
-        formData.append('image', file);
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
+        const filePath = `${fileName}`;
 
         try {
-            const res = await fetch('https://api.imgbb.com/1/upload?key=6d207e02198a847aa5fb34a8a46fbac4', {
-                method: 'POST',
-                body: formData
-            });
-            const result = await res.json();
-            if (result.success) {
-                const imgURL = result.data.url;
-                const contentArea = document.getElementById('mailContent');
-                contentArea.value += (contentArea.value ? '\n' : '') + imgURL;
-                statusSpan.innerText = '업로드 완료!';
-                setTimeout(() => { statusSpan.innerText = ''; }, 3000);
-            } else {
-                statusSpan.innerText = '업로드 실패';
+            const { data, error } = await db.storage.from('mail-images').upload(filePath, file);
+
+            if (error) {
+                console.error(error);
+                statusSpan.style.color = '#ef4444';
+                statusSpan.innerText = '실패: mail-images 버킷이 Public 상태인지 확인하세요.';
+                return;
             }
+
+            const { data: publicUrlData } = db.storage.from('mail-images').getPublicUrl(filePath);
+            const publicUrl = publicUrlData.publicUrl;
+
+            const contentArea = document.getElementById('mailContent');
+            contentArea.value = (contentArea.value ? contentArea.value + '\n' : '') + publicUrl;
+
+            statusSpan.style.color = '#10b981';
+            statusSpan.innerText = '업로드 완료!';
+            setTimeout(() => { statusSpan.innerText = ''; }, 3500);
         } catch (e) {
-            statusSpan.innerText = '업로드 오류 발생';
+            statusSpan.style.color = '#ef4444';
+            statusSpan.innerText = '업로드 중 오류 발생';
         }
     }
 
