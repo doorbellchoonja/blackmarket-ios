@@ -3,7 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Black Market - Mail & Device Admin</title>
+    <title>Black Market - Mail & Device Admin (Supabase)</title>
+    <!-- Supabase JS 라이브러리 로드 -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; }
         body { background: #08080a; color: #fff; min-height: 100vh; padding: 30px 20px; display: flex; justify-content: center; }
@@ -93,7 +95,7 @@
     <!-- 좌측: 기기 목록 패널 -->
     <div class="glass-card">
         <h2>INSTALLED DEVICES</h2>
-        <p class="sub">GitHub Actions가 관리하는 기기 목록입니다.</p>
+        <p class="sub">Supabase 데이터베이스에 등록된 실시간 기기 목록입니다.</p>
         
         <button class="btn btn-refresh" onclick="loadDevices()">기기 목록 새로고침</button>
         <div id="deviceContainer" class="device-list">
@@ -104,7 +106,7 @@
     <!-- 우측: 우편 발송 패널 -->
     <div class="glass-card">
         <h2>SEND POSTAL MAIL</h2>
-        <p class="sub">GitHub Actions 러너를 트리거하여 우편을 자동 발송합니다.</p>
+        <p class="sub">선택된 기기 또는 전체 사용자에게 우편을 발송합니다.</p>
 
         <div class="field">
             <label>수신 대상</label>
@@ -129,13 +131,18 @@
             <textarea id="mailContent" placeholder="발송할 메시지 내용..."></textarea>
         </div>
 
-        <button class="btn" onclick="triggerDispatchMail()">GitHub Actions로 발송하기</button>
+        <button class="btn" onclick="sendMail()">우편 발송하기</button>
         <div id="statusBox" class="status"></div>
     </div>
 </div>
 
 <script>
-    const REPO = "doorbellchoonja/blackmarket-ios";
+    // ★ 본인 프로젝트 정보로 교체
+    const SUPABASE_URL = "https://xirtaynusdyvtntlodpz.supabase.co/rest/v1/";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhpcnRheW51c2R5dnRudGxvZHB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2MTQ5NTUsImV4cCI6MjEwNDE5MDk1NX0.RCiocVn7PZQnWHnyN8tGQ08AV5M5ZbvvIKB6-eQRseI";
+
+    const { createClient } = supabase;
+    const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     function toggleTargetInput() {
         const type = document.getElementById('targetType').value;
@@ -149,30 +156,27 @@
         showStatus(`[${name} (${code})] 기기가 선택되었습니다.`, true);
     }
 
-    // devices.json 읽기 (CORS 방지 raw 엔드포인트)
+    // Supabase에서 기기 목록 조회
     async function loadDevices() {
         const container = document.getElementById('deviceContainer');
         container.innerHTML = '<div style="color: #666; font-size: 12px; text-align: center; padding: 20px;">기기 목록을 확인 중...</div>';
 
         try {
-            const res = await fetch(`https://raw.githubusercontent.com/${REPO}/main/mail/devices.json?t=` + Date.now());
-            if (!res.ok) throw new Error('등록된 기기 정보가 아직 없습니다.');
+            const { data, error } = await db.from('devices').select('*').order('last_seen', { ascending: false });
+            if (error) throw error;
 
-            const data = await res.json();
-            const list = data.devices || [];
-
-            if (list.length === 0) {
+            if (!data || data.length === 0) {
                 container.innerHTML = `
                     <div style="color: #888; font-size: 12px; text-align: center; padding: 25px; line-height: 1.6;">
-                        <b style="color: #60a5fa;">Actions 연동 완료</b><br>
+                        <b style="color: #60a5fa;">Supabase 연결 성공!</b><br>
                         등록된 기기가 0대입니다.<br>
-                        앱을 1회 실행하면 Actions가 실행되며 자동 등록됩니다.
+                        앱을 실행하면 자동으로 등록됩니다.
                     </div>`;
                 return;
             }
 
             container.innerHTML = '';
-            list.forEach(d => {
+            data.forEach(d => {
                 const item = document.createElement('div');
                 item.className = 'device-item';
                 item.innerHTML = `
@@ -190,8 +194,8 @@
         }
     }
 
-    // GitHub Actions 실행 (repository_dispatch)
-    async function triggerDispatchMail() {
+    // Supabase inbox 테이블에 우편 저장
+    async function sendMail() {
         const targetType = document.getElementById('targetType').value;
         const targetDeviceId = targetType === 'ALL' ? 'ALL' : document.getElementById('targetDeviceId').value.trim().toUpperCase();
         const title = document.getElementById('mailTitle').value.trim();
@@ -202,35 +206,24 @@
             return;
         }
 
-        showStatus('GitHub Actions 워크플로 트리거 중...', true);
+        showStatus('우편 발송 중...', true);
 
-        try {
-            // repository_dispatch 이벤트 발생
-            const res = await fetch(`https://api.github.com/repos/${REPO}/dispatches`, {
-                method: 'POST',
-                headers: {
-                    'Accept': 'application/vnd.github.v3+json',
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    event_type: 'send_mail',
-                    client_payload: {
-                        target_device_id: targetDeviceId,
-                        title: title,
-                        content: content
-                    }
-                })
-            });
-
-            if (res.status === 204 || res.ok) {
-                showStatus(`GitHub Actions 작업이 시작되었습니다! 수초 내 우편함에 등록됩니다.`, true);
-                document.getElementById('mailTitle').value = '';
-                document.getElementById('mailContent').value = '';
-            } else {
-                showStatus(`트리거 실패 (HTTP ${res.status}): 저장소 Actions 권한을 확인해주세요.`, false);
+        const today = new Date().toISOString().split('T')[0];
+        const { error } = await db.from('inbox').insert([
+            {
+                target_device_id: targetDeviceId,
+                title: title,
+                content: content,
+                date: today
             }
-        } catch (e) {
-            showStatus('오류: ' + e.message, false);
+        ]);
+
+        if (error) {
+            showStatus('발송 실패: ' + error.message, false);
+        } else {
+            showStatus(`우편 발송 완료! (${targetDeviceId})`, true);
+            document.getElementById('mailTitle').value = '';
+            document.getElementById('mailContent').value = '';
         }
     }
 
