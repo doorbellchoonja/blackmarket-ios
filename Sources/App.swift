@@ -79,7 +79,7 @@ struct DeviceIdManager {
     }
 }
 
-// MARK: - 미디어 다운로드 진행률 및 로컬 캐싱 컨트롤러
+// MARK: - 미디어 영구 캐시 및 다운로드 매니저 (중복 다운로드 방지)
 class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
     static let shared = MediaDownloadManager()
 
@@ -91,7 +91,41 @@ class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelega
     private var completionHandler: ((URL?) -> Void)?
     private var isVideoFile: Bool = false
 
-    func downloadMedia(url: URL, isVideo: Bool, completion: @escaping (URL?) -> Void) {
+    // 영구 캐시 저장 경로
+    private var cacheDirectory: URL {
+        let paths = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+        let dir = paths[0].appendingPathComponent("MailMediaCache", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir
+    }
+
+    // URL 기반 고유 캐시 파일 경로 생성
+    func getCachedFileURL(for remoteURL: URL) -> URL {
+        let ext = remoteURL.pathExtension.isEmpty ? "mp4" : remoteURL.pathExtension
+        let hash = SHA256.hash(data: Data(remoteURL.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
+        return cacheDirectory.appendingPathComponent("\(hash).\(ext)")
+    }
+
+    // 이미 다운로드된 파일인지 검사
+    func isMediaCached(for remoteURL: URL) -> Bool {
+        let cachedURL = getCachedFileURL(for: remoteURL)
+        return FileManager.default.fileExists(atPath: cachedURL.path)
+    }
+
+    func downloadOrGetMedia(url: URL, isVideo: Bool, completion: @escaping (URL?) -> Void) {
+        let cachedURL = getCachedFileURL(for: url)
+
+        // 1. 이미 저장되어 있다면 즉시 로컬 파일 반환 (재다운로드 생략)
+        if FileManager.default.fileExists(atPath: cachedURL.path) {
+            let generator = UIImpactFeedbackGenerator(style: .light)
+            generator.impactOccurred()
+            completion(cachedURL)
+            return
+        }
+
+        // 2. 캐시가 없을 때만 다운로드 시작
         self.completionHandler = completion
         self.isVideoFile = isVideo
         self.activeURL = url
@@ -124,14 +158,7 @@ class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelega
             return
         }
 
-        // 원본 파일명 유지 (스크린샷처럼 상단에 표시하기 위함)
-        var fileName = sourceURL.lastPathComponent
-        if !fileName.contains(".") {
-            fileName += isVideoFile ? ".mp4" : ".png"
-        }
-
-        let tempDir = FileManager.default.temporaryDirectory
-        let destinationURL = tempDir.appendingPathComponent(fileName)
+        let destinationURL = getCachedFileURL(for: sourceURL)
 
         do {
             if FileManager.default.fileExists(atPath: destinationURL.path) {
@@ -163,22 +190,37 @@ class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelega
     }
 }
 
-// MARK: - iOS 시스템 QuickLook(미리보기) 뷰어 래퍼
+// MARK: - [닫기] 버튼이 탑재된 시스템 QuickLook 뷰어
 struct QuickLookPreviewView: UIViewControllerRepresentable {
     let fileURL: URL
+    @Environment(\.presentationMode) var presentationMode
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
 
     func makeUIViewController(context: Context) -> UINavigationController {
-        let qlController = QLPreviewController()
+        let qlController = CustomQLController()
         qlController.dataSource = context.coordinator
+        
         let nav = UINavigationController(rootViewController: qlController)
+        qlController.navigationItem.leftBarButtonItem = UIBarButtonItem(
+            title: "닫기",
+            style: .done,
+            target: context.coordinator,
+            action: #selector(Coordinator.dismissSelf)
+        )
         return nav
     }
 
     func updateUIViewController(_ uiViewController: UINavigationController, context: Context) {}
+
+    class CustomQLController: QLPreviewController {
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            navigationController?.isNavigationBarHidden = false
+        }
+    }
 
     class Coordinator: NSObject, QLPreviewControllerDataSource {
         let parent: QuickLookPreviewView
@@ -193,10 +235,14 @@ struct QuickLookPreviewView: UIViewControllerRepresentable {
         func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
             return parent.fileURL as QLPreviewItem
         }
+
+        @objc func dismissSelf() {
+            parent.presentationMode.wrappedValue.dismiss()
+        }
     }
 }
 
-// MARK: - Video.js 커스텀 웹킷 뷰어
+// MARK: - Video.js 웹킷 플레이어
 struct VideoJSPlayerView: UIViewRepresentable {
     let videoURL: URL
 
@@ -447,13 +493,14 @@ struct LiquidGlassNavigationBar: View {
     }
 }
 
-// MARK: - 우편 본문 뷰 (Video.js + 실시간 진행률 다운로드 + QuickLook 연동)
+// MARK: - 우편 본문 뷰 (영구 캐시 확인 & 1회 다운로드 즉시 열기)
 struct MailContentView: View {
     let content: String
     let onNavigateURL: ((URL) -> Void)?
 
     @ObservedObject var downloadManager = MediaDownloadManager.shared
     @State private var quickLookURL: URL? = nil
+    @State private var updateTrigger: Bool = false
 
     struct ActionBtn: Identifiable {
         let id = UUID()
@@ -517,8 +564,10 @@ struct MailContentView: View {
                     .lineSpacing(4)
             }
 
-            // 동영상 (Video.js 뷰어 + 다운로드 후 QuickLook 시스템 미리보기 실행)
+            // 동영상
             ForEach(parsedVideos, id: \.self) { vidURL in
+                let isCached = downloadManager.isMediaCached(for: vidURL)
+
                 VStack(alignment: .trailing, spacing: 8) {
                     VideoJSPlayerView(videoURL: vidURL)
                         .frame(height: 200)
@@ -544,18 +593,19 @@ struct MailContentView: View {
                         .cornerRadius(8)
                     } else {
                         Button(action: {
-                            downloadManager.downloadMedia(url: vidURL, isVideo: true) { localURL in
+                            downloadManager.downloadOrGetMedia(url: vidURL, isVideo: true) { localURL in
                                 if let localURL = localURL {
                                     self.quickLookURL = localURL
+                                    self.updateTrigger.toggle()
                                 }
                             }
                         }) {
                             HStack(spacing: 5) {
-                                Image(systemName: "arrow.down.circle")
-                                Text("동영상 다운로드 및 미리보기")
+                                Image(systemName: isCached ? "play.circle.fill" : "arrow.down.circle")
+                                Text(isCached ? "미리보기 열기" : "동영상 다운로드 및 미리보기")
                             }
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.blue)
+                            .foregroundColor(isCached ? .green : .blue)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
                             .background(Color.white.opacity(0.06))
@@ -565,8 +615,10 @@ struct MailContentView: View {
                 }
             }
 
-            // 이미지 및 GIF (탭 시 다운로드 후 시스템 QuickLook 실행)
+            // 이미지 및 GIF
             ForEach(parsedImages, id: \.self) { imgURL in
+                let isCached = downloadManager.isMediaCached(for: imgURL)
+
                 VStack(alignment: .trailing, spacing: 6) {
                     AsyncImage(url: imgURL) { phase in
                         switch phase {
@@ -576,9 +628,10 @@ struct MailContentView: View {
                                 .cornerRadius(10)
                                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.15), lineWidth: 0.8))
                                 .onTapGesture {
-                                    downloadManager.downloadMedia(url: imgURL, isVideo: false) { localURL in
+                                    downloadManager.downloadOrGetMedia(url: imgURL, isVideo: false) { localURL in
                                         if let localURL = localURL {
                                             self.quickLookURL = localURL
+                                            self.updateTrigger.toggle()
                                         }
                                     }
                                 }
@@ -598,6 +651,10 @@ struct MailContentView: View {
                                 .frame(width: 80)
                                 .tint(.blue)
                         }
+                    } else if isCached {
+                        Text("다운로드 완료됨")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.gray.opacity(0.8))
                     }
                 }
             }
@@ -633,8 +690,8 @@ struct MailContentView: View {
                 .padding(.top, 4)
             }
         }
-        // iOS 시스템 QuickLook 모달 표출
-        .sheet(item: Binding(
+        // [닫기] 버튼이 포함된 QuickLook 미리보기 모달
+        .fullScreenCover(item: Binding(
             get: { quickLookURL.map { IdentifiableURL(url: $0) } },
             set: { quickLookURL = $0?.url }
         )) { item in
