@@ -1,0 +1,5 @@
+CFBundleDisplayName = "Marché Noir";
+CFBundleName = "Marché Noir";
+NSFaceIDUsageDescription = "L'authentification biométrique est requise pour la connexion par clé d'accès et la vérification d'identité.";
+NSPhotoLibraryAdditionsUsageDescription = "L'autorisation est requise pour enregistrer des photos et des vidéos de la boîte de réception dans votre photothèque.";
+NSPhotoLibraryUsageDescription = "L'accès à votre photothèque est requis pour enregistrer les médias de la boîte de réception.";
