@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
     <key>CFBundleExecutable</key>
     <string>BlackMarket</string>
     <key>CFBundleIdentifier</key>
@@ -21,7 +23,18 @@
     <key>UILaunchScreen</key>
     <dict/>
 
-    <!-- 백그라운드 푸시 알림 모드 활성화 -->
+    <!-- 지원 언어 목록 명시 -->
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>ko</string>
+        <string>en</string>
+        <string>ja</string>
+        <string>zh-Hans</string>
+        <string>ru</string>
+        <string>fr</string>
+    </array>
+
+    <!-- 백그라운드 푸시 알림 모드 -->
     <key>UIBackgroundModes</key>
     <array>
         <string>remote-notification</string>
@@ -56,7 +69,19 @@
         </dict>
     </array>
 
+    <!-- 기본 권한 문구 (다국어 파일이 없을 때 Fallback으로 사용) -->
     <key>NSFaceIDUsageDescription</key>
-    <string>Black Market 패스키 로그인 및 본인 인증을 위해 생체 인식이 필요합니다.</string>
+    <string>Biometric authentication is required for passkey login and identity verification.</string>
+    <key>NSPhotoLibraryAdditionsUsageDescription</key>
+    <string>Permission is required to save photos and videos from the mailbox to your photo library.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Permission is required to save media from the mailbox to your photo library.</string>
+
+    <!-- 외부 미디어 및 CDN 로드 허용 -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
 </dict>
 </plist>
