@@ -11,7 +11,7 @@
         body { background: #08080a; color: #fff; min-height: 100vh; padding: 30px 20px; display: flex; justify-content: center; }
         .container { width: 100%; max-width: 960px; display: grid; grid-template-columns: 1.1fr 1fr; gap: 24px; }
         @media (max-width: 840px) { .container { grid-template-columns: 1fr; } }
-        
+        
         .glass-card {
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -39,7 +39,7 @@
         }
         input:focus, textarea:focus, select:focus { border-color: #3b82f6; box-shadow: 0 0 10px rgba(59,130,246,0.3); }
         textarea { resize: vertical; min-height: 80px; }
-        
+        
         .btn {
             width: 100%;
             padding: 12px;
@@ -56,7 +56,7 @@
         .btn:hover { background: #1d4ed8; }
         .btn-refresh { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); margin-bottom: 12px; }
         .btn-refresh:hover { background: rgba(255,255,255,0.15); }
-        
+        
         .status { margin-top: 14px; font-size: 12px; text-align: center; display: none; }
         .success { color: #10b981; }
         .error { color: #ef4444; }
@@ -96,7 +96,7 @@
     <div class="glass-card">
         <h2>INSTALLED DEVICES</h2>
         <p class="sub">Supabase 데이터베이스에 등록된 실시간 기기 목록입니다.</p>
-        
+        
         <button class="btn btn-refresh" onclick="loadDevices()">기기 목록 새로고침</button>
         <div id="deviceContainer" class="device-list">
             <div style="color: #666; font-size: 12px; text-align: center; padding: 20px;">기기 목록을 불러오는 중...</div>
@@ -137,8 +137,8 @@
 </div>
 
 <script>
-    // ★ 본인 프로젝트 정보로 교체
-    const SUPABASE_URL = "https://xirtaynusdyvtntlodpz.supabase.co/rest/v1";
+    // 끝의 /rest/v1 경로를 제거한 순수 기본 도메인 적용
+    const SUPABASE_URL = "https://xirtaynusdyvtntlodpz.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhpcnRheW51c2R5dnRudGxvZHB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2MTQ5NTUsImV4cCI6MjEwNDE5MDk1NX0.RCiocVn7PZQnWHnyN8tGQ08AV5M5ZbvvIKB6-eQRseI";
 
     const { createClient } = supabase;
@@ -190,7 +190,7 @@
                 container.appendChild(item);
             });
         } catch (e) {
-            container.innerHTML = `<div style="color: #ef4444; font-size: 12px; text-align: center; padding: 20px;">${e.message}</div>`;
+            container.innerHTML = `<div style="color: #ef4444; font-size: 12px; text-align: center; padding: 20px;">${e.message || e}</div>`;
         }
     }
 
