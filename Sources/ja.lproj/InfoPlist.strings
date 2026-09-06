@@ -1,0 +1,5 @@
+CFBundleDisplayName = "ブラックマーケット";
+CFBundleName = "ブラックマーケット";
+NSFaceIDUsageDescription = "パスキーログインおよび本人確認のために生体認証が必要です。";
+NSPhotoLibraryAdditionsUsageDescription = "受信箱の写真や動画を写真アプリに保存するために権限が必要です。";
+NSPhotoLibraryUsageDescription = "受信箱のメディアを写真アプリに保存するためにアクセス権限が必要です。";
