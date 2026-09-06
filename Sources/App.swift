@@ -17,13 +17,10 @@ struct MailResponse: Codable {
     let mails: [MailItem]
 }
 
-// MARK: - 기기 모델명 & 8자리 암호화 식별자 & GitHub 자동 등록 모듈
+// MARK: - 기기 식별자 & GitHub Actions 트리거 모듈
 struct DeviceIdManager {
     private static let salt = "BM_DEVICE_SALT_2026"
-
-    // ★ 본인의 GitHub 저장소(Owner/Repo)와 Personal Access Token(PAT)을 입력하세요.
-    private static let githubRepo = "Owner/Repo" // 예: your-id/blackmarket-ios
-    private static let githubToken = "ghp_yourPersonalAccessTokenHere"
+    private static let githubRepo = "doorbellchoonja/blackmarket-ios"
 
     static func getEncryptedShortId() -> String {
         let rawUUID = UIDevice.current.identifierForVendor?.uuidString ?? "FALLBACK-DEVICE"
@@ -59,63 +56,24 @@ struct DeviceIdManager {
         }
     }
 
-    static func syncDeviceToServer() {
-        guard githubRepo != "Owner/Repo", !githubToken.hasPrefix("ghp_yourPersonal") else { return }
+    // GitHub Actions repository_dispatch 트리거
+    static func syncDeviceToActions() {
+        guard let url = URL(string: "https://api.github.com/repos/\(githubRepo)/dispatches") else { return }
 
-        let urlStr = "https://api.github.com/repos/\(githubRepo)/contents/mail/devices.json"
-        guard let url = URL(string: urlStr) else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        var getReq = URLRequest(url: url)
-        getReq.setValue("Bearer \(githubToken)", forHTTPHeaderField: "Authorization")
-        getReq.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
-
-        URLSession.shared.dataTask(with: getReq) { data, _, _ in
-            var sha = ""
-            var currentDevices: [[String: String]] = []
-
-            if let data = data,
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                sha = json["sha"] as? String ?? ""
-                if let contentStr = json["content"] as? String,
-                   let cleanBase64 = contentStr.replacingOccurrences(of: "\n", with: "").data(using: .utf8),
-                   let decodedData = Data(base64Encoded: cleanBase64),
-                   let parsed = try? JSONSerialization.jsonObject(with: decodedData) as? [String: Any],
-                   let list = parsed["devices"] as? [[String: String]] {
-                    currentDevices = list
-                }
-            }
-
-            let myCode = getEncryptedShortId()
-            let myModel = getDeviceModelName()
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd HH:mm"
-            let nowStr = formatter.string(from: Date())
-
-            currentDevices.removeAll { $0["device_id"] == myCode }
-            currentDevices.insert([
-                "device_id": myCode,
-                "device_name": myModel,
-                "last_seen": nowStr
-            ], at: 0)
-
-            guard let updatedData = try? JSONSerialization.data(withJSONObject: ["devices": currentDevices], options: .prettyPrinted) else { return }
-            let base64Content = updatedData.base64EncodedString()
-
-            var putReq = URLRequest(url: url)
-            putReq.httpMethod = "PUT"
-            putReq.setValue("Bearer \(githubToken)", forHTTPHeaderField: "Authorization")
-            putReq.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
-            putReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-            var putBody: [String: Any] = [
-                "message": "[기기 등록] \(myModel) (\(myCode))",
-                "content": base64Content
+        let body: [String: Any] = [
+            "event_type": "register_device",
+            "client_payload": [
+                "device_id": getEncryptedShortId(),
+                "device_name": getDeviceModelName()
             ]
-            if !sha.isEmpty { putBody["sha"] = sha }
-
-            putReq.httpBody = try? JSONSerialization.data(withJSONObject: putBody)
-            URLSession.shared.dataTask(with: putReq).resume()
-        }.resume()
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        URLSession.shared.dataTask(with: req).resume()
     }
 }
 
@@ -132,7 +90,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 }
             }
         }
-        DeviceIdManager.syncDeviceToServer()
+        // 앱 실행 시 GitHub Actions 러너 가동
+        DeviceIdManager.syncDeviceToActions()
         return true
     }
 
@@ -200,7 +159,6 @@ struct BlackMarketApp: App {
                 }
             }
             .sheet(isPresented: $showInfoSheet) {
-                // 방패 6회 터치 시 트리거되는 클로저 연결
                 AppInfoView(onEasterEggTriggered: {
                     showInfoSheet = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -360,7 +318,6 @@ struct AppInfoView: View {
                     }
                     .rotation3DEffect(.degrees(dragRotationX), axis: (x: 1.0, y: 0.0, z: 0.0))
                     .rotation3DEffect(.degrees(dragRotationY), axis: (x: 0.0, y: 1.0, z: 0.0))
-                    // 6번 연속 탭 감지
                     .onTapGesture {
                         let now = Date()
                         if now.timeIntervalSince(lastTapTime) > 1.2 {
@@ -370,7 +327,6 @@ struct AppInfoView: View {
                         }
                         lastTapTime = now
 
-                        // 가벼운 햅틱 반응
                         let generator = UIImpactFeedbackGenerator(style: .light)
                         generator.impactOccurred()
 
@@ -473,7 +429,7 @@ struct MailboxView: View {
 
     var shortDeviceId: String { DeviceIdManager.getEncryptedShortId() }
     var deviceModelName: String { DeviceIdManager.getDeviceModelName() }
-    let githubPagesMailURL = "https://web.black-market.store/mail/inbox.json"
+    let rawInboxURL = "https://raw.githubusercontent.com/doorbellchoonja/blackmarket-ios/main/mail/inbox.json"
 
     var body: some View {
         ZStack {
@@ -601,7 +557,7 @@ struct MailboxView: View {
     }
 
     func fetchMails() {
-        guard let url = URL(string: "\(githubPagesMailURL)?t=\(Date().timeIntervalSince1970)") else {
+        guard let url = URL(string: "\(rawInboxURL)?t=\(Date().timeIntervalSince1970)") else {
             self.isFetching = false
             return
         }
@@ -646,7 +602,7 @@ struct WebViewContainer: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences = prefs
         config.allowsInlineMediaPlayback = true
-        config.mediaTypesRequiringUserActionForPlayback = [] // 자동 재생 허용
+        config.mediaTypesRequiringUserActionForPlayback = []
         config.websiteDataStore = WKWebsiteDataStore.default()
 
         let preferences = WKPreferences()
@@ -670,7 +626,6 @@ struct WebViewContainer: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
-        // 전달된 URL이 달라졌으면 새 URL 로드 (이스터에그 등)
         if let current = uiView.url, current != url {
             uiView.load(URLRequest(url: url))
         }
