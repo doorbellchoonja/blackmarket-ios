@@ -3,7 +3,7 @@ import WebKit
 import UserNotifications
 import AuthenticationServices
 import CryptoKit
-import Photos
+import QuickLook
 
 // MARK: - 우편 모델
 struct MailItem: Identifiable, Codable {
@@ -79,7 +79,7 @@ struct DeviceIdManager {
     }
 }
 
-// MARK: - 미디어 다운로드 진행률 및 사진앱 정밀 저장 컨트롤러
+// MARK: - 미디어 다운로드 진행률 및 로컬 캐싱 컨트롤러
 class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
     static let shared = MediaDownloadManager()
 
@@ -88,10 +88,10 @@ class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelega
     @Published var loadedSizeText: String = "0.0MB / 0.0MB"
     @Published var activeURL: URL? = nil
 
-    private var completionHandler: ((Bool, String) -> Void)?
+    private var completionHandler: ((URL?) -> Void)?
     private var isVideoFile: Bool = false
 
-    func downloadAndSave(url: URL, isVideo: Bool, completion: @escaping (Bool, String) -> Void) {
+    func downloadMedia(url: URL, isVideo: Bool, completion: @escaping (URL?) -> Void) {
         self.completionHandler = completion
         self.isVideoFile = isVideo
         self.activeURL = url
@@ -120,77 +120,78 @@ class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelega
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         guard let sourceURL = self.activeURL else {
-            finishWithResult(success: false, message: "URL 정보가 없습니다.")
+            finish(localURL: nil)
             return
         }
 
-        let ext = sourceURL.pathExtension.isEmpty ? (isVideoFile ? "mp4" : "png") : sourceURL.pathExtension
+        // 원본 파일명 유지 (스크린샷처럼 상단에 표시하기 위함)
+        var fileName = sourceURL.lastPathComponent
+        if !fileName.contains(".") {
+            fileName += isVideoFile ? ".mp4" : ".png"
+        }
+
         let tempDir = FileManager.default.temporaryDirectory
-        let destinationURL = tempDir.appendingPathComponent("\(UUID().uuidString).\(ext)")
+        let destinationURL = tempDir.appendingPathComponent(fileName)
 
         do {
             if FileManager.default.fileExists(atPath: destinationURL.path) {
                 try FileManager.default.removeItem(at: destinationURL)
             }
             try FileManager.default.copyItem(at: location, to: destinationURL)
+            finish(localURL: destinationURL)
         } catch {
-            finishWithResult(success: false, message: "임시 파일 생성 실패: \(error.localizedDescription)")
-            return
-        }
-
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-            guard status == .authorized || status == .limited else {
-                try? FileManager.default.removeItem(at: destinationURL)
-                self.finishWithResult(success: false, message: "사진 앱 접근 권한이 없습니다. 설정에서 허용해주세요.")
-                return
-            }
-
-            if self.isVideoFile {
-                if !UIVideoAtPathIsCompatibleWithSavedPhotosAlbum(destinationURL.path) {
-                    try? FileManager.default.removeItem(at: destinationURL)
-                    self.finishWithResult(success: false, message: "iOS 사진 앱과 호환되지 않는 비디오 코덱입니다.")
-                    return
-                }
-
-                PHPhotoLibrary.shared().performChanges({
-                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: destinationURL)
-                }) { success, err in
-                    try? FileManager.default.removeItem(at: destinationURL)
-                    self.finishWithResult(success: success, message: success ? "사진 앱에 동영상이 정상 저장되었습니다." : (err?.localizedDescription ?? "저장 실패"))
-                }
-            } else {
-                guard let data = try? Data(contentsOf: destinationURL) else {
-                    try? FileManager.default.removeItem(at: destinationURL)
-                    self.finishWithResult(success: false, message: "이미지 데이터를 읽을 수 없습니다.")
-                    return
-                }
-
-                PHPhotoLibrary.shared().performChanges({
-                    let request = PHAssetCreationRequest.forAsset()
-                    request.addResource(with: .photo, data: data, options: nil)
-                }) { success, err in
-                    try? FileManager.default.removeItem(at: destinationURL)
-                    self.finishWithResult(success: success, message: success ? "사진 앱에 이미지가 정상 저장되었습니다." : (err?.localizedDescription ?? "저장 실패"))
-                }
-            }
+            finish(localURL: nil)
         }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error = error {
-            finishWithResult(success: false, message: "다운로드 오류: \(error.localizedDescription)")
+        if error != nil {
+            finish(localURL: nil)
         }
     }
 
-    private func finishWithResult(success: Bool, message: String) {
+    private func finish(localURL: URL?) {
         DispatchQueue.main.async {
             self.isDownloading = false
             self.activeURL = nil
-            if success {
+            if localURL != nil {
                 let generator = UINotificationFeedbackGenerator()
                 generator.notificationOccurred(.success)
             }
-            self.completionHandler?(success, message)
+            self.completionHandler?(localURL)
+        }
+    }
+}
+
+// MARK: - iOS 시스템 QuickLook(미리보기) 뷰어 래퍼
+struct QuickLookPreviewView: UIViewControllerRepresentable {
+    let fileURL: URL
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIViewController(context: Context) -> UINavigationController {
+        let qlController = QLPreviewController()
+        qlController.dataSource = context.coordinator
+        let nav = UINavigationController(rootViewController: qlController)
+        return nav
+    }
+
+    func updateUIViewController(_ uiViewController: UINavigationController, context: Context) {}
+
+    class Coordinator: NSObject, QLPreviewControllerDataSource {
+        let parent: QuickLookPreviewView
+        init(_ parent: QuickLookPreviewView) {
+            self.parent = parent
+        }
+
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
+            return 1
+        }
+
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+            return parent.fileURL as QLPreviewItem
         }
     }
 }
@@ -446,98 +447,13 @@ struct LiquidGlassNavigationBar: View {
     }
 }
 
-// MARK: - 이미지 전체화면 확대 뷰어 모달 (프로그레스 바 탑재)
-struct FullScreenImageViewer: View {
-    let imageURL: URL
-    @Binding var isPresented: Bool
-    @ObservedObject var downloadManager = MediaDownloadManager.shared
-    @State private var toastMessage: String? = nil
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Color.black.edgesIgnoringSafeArea(.all)
-
-            AsyncImage(url: imageURL) { phase in
-                switch phase {
-                case .success(let img):
-                    img.resizable()
-                        .scaledToFit()
-                        .padding()
-                case .failure(_):
-                    Text("이미지를 불러올 수 없습니다.").foregroundColor(.gray)
-                default:
-                    ProgressView().colorScheme(.dark)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            VStack(alignment: .trailing, spacing: 12) {
-                HStack(spacing: 14) {
-                    if downloadManager.isDownloading && downloadManager.activeURL == imageURL {
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text("\(Int(downloadManager.progress * 100))% (\(downloadManager.loadedSizeText))")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(.blue)
-                            ProgressView(value: downloadManager.progress, total: 1.0)
-                                .frame(width: 110)
-                                .tint(.blue)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.7))
-                        .cornerRadius(8)
-                    } else {
-                        Button(action: {
-                            downloadManager.downloadAndSave(url: imageURL, isVideo: false) { success, msg in
-                                toastMessage = msg
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { toastMessage = nil }
-                            }
-                        }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "square.and.arrow.down")
-                                Text("사진앱 저장")
-                            }
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(Color.blue)
-                            .clipShape(Capsule())
-                        }
-                    }
-
-                    Button(action: { isPresented = false }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 28))
-                            .foregroundColor(.white.opacity(0.85))
-                    }
-                }
-
-                if let toast = toastMessage {
-                    Text(toast)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.black.opacity(0.85))
-                        .cornerRadius(8)
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.2), lineWidth: 0.8))
-                }
-            }
-            .padding(.top, 50)
-            .padding(.trailing, 20)
-        }
-    }
-}
-
-// MARK: - 우편 본문 정밀 파서 (Video.js + 동영상 진행률 저장 바 + 액션 버튼)
+// MARK: - 우편 본문 뷰 (Video.js + 실시간 진행률 다운로드 + QuickLook 연동)
 struct MailContentView: View {
     let content: String
     let onNavigateURL: ((URL) -> Void)?
 
     @ObservedObject var downloadManager = MediaDownloadManager.shared
-    @State private var selectedPreviewImage: URL? = nil
-    @State private var statusFeedbackText: [URL: String] = [:]
+    @State private var quickLookURL: URL? = nil
 
     struct ActionBtn: Identifiable {
         let id = UUID()
@@ -601,7 +517,7 @@ struct MailContentView: View {
                     .lineSpacing(4)
             }
 
-            // 동영상 (Video.js + 실시간 다운로드 프로그레스 바)
+            // 동영상 (Video.js 뷰어 + 다운로드 후 QuickLook 시스템 미리보기 실행)
             ForEach(parsedVideos, id: \.self) { vidURL in
                 VStack(alignment: .trailing, spacing: 8) {
                     VideoJSPlayerView(videoURL: vidURL)
@@ -628,19 +544,18 @@ struct MailContentView: View {
                         .cornerRadius(8)
                     } else {
                         Button(action: {
-                            downloadManager.downloadAndSave(url: vidURL, isVideo: true) { success, msg in
-                                statusFeedbackText[vidURL] = msg
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                                    statusFeedbackText.removeValue(forKey: vidURL)
+                            downloadManager.downloadMedia(url: vidURL, isVideo: true) { localURL in
+                                if let localURL = localURL {
+                                    self.quickLookURL = localURL
                                 }
                             }
                         }) {
                             HStack(spacing: 5) {
-                                Image(systemName: "video.badge.plus")
-                                Text(statusFeedbackText[vidURL] ?? "사진앱에 동영상 저장")
+                                Image(systemName: "arrow.down.circle")
+                                Text("동영상 다운로드 및 미리보기")
                             }
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(statusFeedbackText[vidURL] != nil ? .green : .blue)
+                            .foregroundColor(.blue)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
                             .background(Color.white.opacity(0.06))
@@ -650,22 +565,39 @@ struct MailContentView: View {
                 }
             }
 
-            // 이미지 / GIF
+            // 이미지 및 GIF (탭 시 다운로드 후 시스템 QuickLook 실행)
             ForEach(parsedImages, id: \.self) { imgURL in
-                AsyncImage(url: imgURL) { phase in
-                    switch phase {
-                    case .success(let img):
-                        img.resizable()
-                            .scaledToFit()
-                            .cornerRadius(10)
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.15), lineWidth: 0.8))
-                            .onTapGesture {
-                                selectedPreviewImage = imgURL
-                            }
-                    case .empty:
-                        ProgressView().colorScheme(.dark).frame(height: 120)
-                    default:
-                        EmptyView()
+                VStack(alignment: .trailing, spacing: 6) {
+                    AsyncImage(url: imgURL) { phase in
+                        switch phase {
+                        case .success(let img):
+                            img.resizable()
+                                .scaledToFit()
+                                .cornerRadius(10)
+                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.15), lineWidth: 0.8))
+                                .onTapGesture {
+                                    downloadManager.downloadMedia(url: imgURL, isVideo: false) { localURL in
+                                        if let localURL = localURL {
+                                            self.quickLookURL = localURL
+                                        }
+                                    }
+                                }
+                        case .empty:
+                            ProgressView().colorScheme(.dark).frame(height: 120)
+                        default:
+                            EmptyView()
+                        }
+                    }
+
+                    if downloadManager.isDownloading && downloadManager.activeURL == imgURL {
+                        HStack {
+                            Text("\(Int(downloadManager.progress * 100))% (\(downloadManager.loadedSizeText))")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(.blue)
+                            ProgressView(value: downloadManager.progress, total: 1.0)
+                                .frame(width: 80)
+                                .tint(.blue)
+                        }
                     }
                 }
             }
@@ -701,14 +633,13 @@ struct MailContentView: View {
                 .padding(.top, 4)
             }
         }
-        .fullScreenCover(item: Binding(
-            get: { selectedPreviewImage.map { IdentifiableURL(url: $0) } },
-            set: { selectedPreviewImage = $0?.url }
+        // iOS 시스템 QuickLook 모달 표출
+        .sheet(item: Binding(
+            get: { quickLookURL.map { IdentifiableURL(url: $0) } },
+            set: { quickLookURL = $0?.url }
         )) { item in
-            FullScreenImageViewer(imageURL: item.url, isPresented: Binding(
-                get: { selectedPreviewImage != nil },
-                set: { if !$0 { selectedPreviewImage = nil } }
-            ))
+            QuickLookPreviewView(fileURL: item.url)
+                .edgesIgnoringSafeArea(.all)
         }
     }
 }
