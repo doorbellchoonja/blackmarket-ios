@@ -97,19 +97,52 @@
         .device-info .code { font-size: 12px; font-family: monospace; color: #60a5fa; font-weight: 800; letter-spacing: 1px; margin-top: 2px; }
         .device-info .time { font-size: 10px; color: #666; margin-top: 2px; }
 
-        .upload-row { display: flex; gap: 8px; margin-top: 6px; align-items: center; flex-wrap: wrap; }
+        /* 업로드 컴포넌트 & 프로그레스 바 스타일 */
+        .upload-section { margin-top: 6px; }
+        .upload-row { display: flex; gap: 10px; align-items: center; }
         .file-label {
             background: rgba(255, 255, 255, 0.08);
             border: 1px solid rgba(255, 255, 255, 0.2);
-            padding: 8px 12px;
+            padding: 8px 14px;
             border-radius: 8px;
             font-size: 12px;
             font-weight: 600;
             cursor: pointer;
             display: inline-block;
+            transition: 0.2s;
         }
         .file-label:hover { background: rgba(255, 255, 255, 0.15); }
-        .upload-status { font-size: 12px; font-weight: 600; }
+
+        .progress-box {
+            display: none;
+            margin-top: 10px;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px 12px;
+        }
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #93c5fd;
+            font-family: monospace;
+            margin-bottom: 6px;
+        }
+        .progress-bar-bg {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .progress-bar-fill {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+            border-radius: 3px;
+            transition: width 0.1s ease;
+        }
     </style>
 </head>
 <body>
@@ -154,10 +187,22 @@
 
         <div class="field">
             <label>미디어 직접 첨부 (사진 및 동영상)</label>
-            <div class="upload-row">
-                <input type="file" id="mediaInput" accept="image/*,video/*" style="display:none" onchange="handleMediaUpload()">
-                <label for="mediaInput" class="file-label">📁 사진 / 영상 파일 선택 및 업로드</label>
-                <span id="uploadStatus" class="upload-status"></span>
+            <div class="upload-section">
+                <div class="upload-row">
+                    <input type="file" id="mediaInput" accept="image/*,video/*" style="display:none" onchange="handleMediaUploadWithProgress()">
+                    <label for="mediaInput" class="file-label">📁 사진 / 영상 파일 선택</label>
+                </div>
+
+                <!-- 실시간 용량 및 퍼센트 프로그레스 박스 -->
+                <div id="progressBox" class="progress-box">
+                    <div class="progress-header">
+                        <span id="progressText">0% 업로드 중...</span>
+                        <span id="progressBytes">0.0MB / 0.0MB</span>
+                    </div>
+                    <div class="progress-bar-bg">
+                        <div id="progressBarFill" class="progress-bar-fill"></div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -247,43 +292,74 @@
         }
     }
 
-    // 사진 또는 동영상 Supabase Storage 업로드
-    async function handleMediaUpload() {
+    // XHR 기반 Supabase Storage 실시간 진행률(0.1MB / 1.0MB, %) 업로드
+    function handleMediaUploadWithProgress() {
         const fileInput = document.getElementById('mediaInput');
-        const statusSpan = document.getElementById('uploadStatus');
         const file = fileInput.files[0];
         if (!file) return;
 
-        statusSpan.style.color = '#60a5fa';
-        statusSpan.innerText = '업로드 진행 중...';
+        const progressBox = document.getElementById('progressBox');
+        const progressBarFill = document.getElementById('progressBarFill');
+        const progressText = document.getElementById('progressText');
+        const progressBytes = document.getElementById('progressBytes');
+
+        progressBox.style.display = 'block';
+        progressBarFill.style.width = '0%';
+        progressText.style.color = '#93c5fd';
+        progressText.innerText = '0% 업로드 중...';
 
         const fileExt = file.name.split('.').pop();
         const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
-        const filePath = `${fileName}`;
+        const uploadUrl = `${SUPABASE_URL}/storage/v1/object/mail-images/${fileName}`;
 
-        try {
-            const { data, error } = await db.storage.from('mail-images').upload(filePath, file);
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', uploadUrl, true);
 
-            if (error) {
-                console.error(error);
-                statusSpan.style.color = '#ef4444';
-                statusSpan.innerText = '실패: RLS 정책(SQL) 등록 여부를 확인하세요.';
-                return;
+        // Supabase 인증 헤더 및 콘텐츠 타입
+        xhr.setRequestHeader('apikey', SUPABASE_ANON_KEY);
+        xhr.setRequestHeader('Authorization', `Bearer ${SUPABASE_ANON_KEY}`);
+        xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+        xhr.setRequestHeader('x-upsert', 'true');
+
+        // 실시간 전송량 트래킹
+        xhr.upload.onprogress = function (e) {
+            if (e.lengthComputable) {
+                const percent = Math.round((e.loaded / e.total) * 100);
+                const loadedMB = (e.loaded / (1024 * 1024)).toFixed(1);
+                const totalMB = (e.total / (1024 * 1024)).toFixed(1);
+
+                progressBarFill.style.width = `${percent}%`;
+                progressText.innerText = `${percent}% 업로드 중...`;
+                progressBytes.innerText = `${loadedMB}MB / ${totalMB}MB`;
             }
+        };
 
-            const { data: publicUrlData } = db.storage.from('mail-images').getPublicUrl(filePath);
-            const publicUrl = publicUrlData.publicUrl;
+        xhr.onload = function () {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                progressBarFill.style.width = '100%';
+                progressText.style.color = '#10b981';
+                progressText.innerText = '업로드 완료!';
 
-            const contentArea = document.getElementById('mailContent');
-            contentArea.value = (contentArea.value ? contentArea.value + '\n' : '') + publicUrl;
+                const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/mail-images/${fileName}`;
+                const contentArea = document.getElementById('mailContent');
+                contentArea.value = (contentArea.value ? contentArea.value + '\n' : '') + publicUrl;
 
-            statusSpan.style.color = '#10b981';
-            statusSpan.innerText = '업로드 완료!';
-            setTimeout(() => { statusSpan.innerText = ''; }, 3500);
-        } catch (e) {
-            statusSpan.style.color = '#ef4444';
-            statusSpan.innerText = '업로드 중 오류 발생';
-        }
+                setTimeout(() => {
+                    progressBox.style.display = 'none';
+                    fileInput.value = '';
+                }, 3500);
+            } else {
+                progressText.style.color = '#ef4444';
+                progressText.innerText = '업로드 실패 (권한 정책 확인 필요)';
+            }
+        };
+
+        xhr.onerror = function () {
+            progressText.style.color = '#ef4444';
+            progressText.innerText = '네트워크 오류 발생';
+        };
+
+        xhr.send(file);
     }
 
     async function sendMail() {
