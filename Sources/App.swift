@@ -17,7 +17,6 @@ struct MailItem: Identifiable, Codable {
 struct DeviceIdManager {
     private static let salt = "BM_DEVICE_SALT_2026"
 
-    // 순수 프로젝트 Base URL 적용 (/rest/v1 중복 제거)
     static let supabaseUrl = "https://xirtaynusdyvtntlodpz.supabase.co"
     static let supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhpcnRheW51c2R5dnRudGxvZHB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2MTQ5NTUsImV4cCI6MjEwNDE5MDk1NX0.RCiocVn7PZQnWHnyN8tGQ08AV5M5ZbvvIKB6-eQRseI"
 
@@ -55,7 +54,6 @@ struct DeviceIdManager {
         }
     }
 
-    // Supabase PostgREST API로 기기 자동 등록 (Upsert)
     static func syncDeviceToServer() {
         guard let url = URL(string: "\(supabaseUrl)/rest/v1/devices") else { return }
 
@@ -68,7 +66,6 @@ struct DeviceIdManager {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
         req.setValue("Bearer \(supabaseAnonKey)", forHTTPHeaderField: "Authorization")
-        // 기존 기기 식별자 존재 시 자동 병합 (Upsert)
         req.setValue("resolution=merge-duplicates", forHTTPHeaderField: "Prefer")
 
         let body: [String: String] = [
@@ -172,7 +169,13 @@ struct BlackMarketApp: App {
                 })
             }
             .sheet(isPresented: $showMailSheet) {
-                MailboxView()
+                // 버튼 누르면 우편함 닫고 메인 웹뷰 이동
+                MailboxView(onNavigateURL: { targetURL in
+                    showMailSheet = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        self.currentURL = targetURL
+                    }
+                })
             }
             .onAppear {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -423,9 +426,119 @@ struct AppInfoView: View {
     }
 }
 
-// MARK: - 우편함 모달 (Supabase REST 조회)
+// MARK: - 우편 본문 정밀 파서 (마크다운 버튼 & 이미지 렌더링)
+struct MailContentView: View {
+    let content: String
+    let onNavigateURL: ((URL) -> Void)?
+
+    struct ActionBtn: Identifiable {
+        let id = UUID()
+        let label: String
+        let url: URL
+    }
+
+    // [버튼명](링크) 파싱
+    var parsedButtons: [ActionBtn] {
+        let pattern = "\\[([^\\]]+)\\]\\((https?://[^\\)]+)\\)"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let nsContent = content as NSString
+        let matches = regex.matches(in: content, range: NSRange(location: 0, length: nsContent.length))
+        
+        return matches.compactMap { m in
+            guard m.numberOfRanges >= 3 else { return nil }
+            let title = nsContent.substring(with: m.range(at: 1))
+            let urlString = nsContent.substring(with: m.range(at: 2))
+            guard let url = URL(string: urlString) else { return nil }
+            return ActionBtn(label: title, url: url)
+        }
+    }
+
+    // 이미지 URL 파싱
+    var parsedImages: [URL] {
+        let pattern = "(https?://[^\\s]+\\.(?:png|jpg|jpeg|gif|webp))"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
+        let nsContent = content as NSString
+        let matches = regex.matches(in: content, range: NSRange(location: 0, length: nsContent.length))
+        
+        return matches.compactMap { m in
+            let urlString = nsContent.substring(with: m.range)
+            return URL(string: urlString)
+        }
+    }
+
+    // 순수 텍스트 본문
+    var cleanedText: String {
+        var txt = content
+        txt = txt.replacingOccurrences(of: "\\[([^\\]]+)\\]\\((https?://[^\\)]+)\\)", with: "", options: .regularExpression)
+        txt = txt.replacingOccurrences(of: "(https?://[^\\s]+\\.(?:png|jpg|jpeg|gif|webp))", with: "", options: .regularExpression)
+        return txt.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !cleanedText.isEmpty {
+                Text(cleanedText)
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.9))
+                    .lineSpacing(4)
+            }
+
+            // 업로드된 이미지 표시
+            ForEach(parsedImages, id: \.self) { imgURL in
+                AsyncImage(url: imgURL) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable()
+                            .scaledToFit()
+                            .cornerRadius(10)
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.15), lineWidth: 0.8))
+                    case .empty:
+                        ProgressView().colorScheme(.dark).frame(height: 120)
+                    default:
+                        EmptyView()
+                    }
+                }
+            }
+
+            // [버튼명](링크) 액션 버튼 렌더링
+            if !parsedButtons.isEmpty {
+                VStack(spacing: 8) {
+                    ForEach(parsedButtons) { btn in
+                        Button(action: {
+                            onNavigateURL?(btn.url)
+                        }) {
+                            HStack {
+                                Text(btn.label)
+                                    .font(.system(size: 13, weight: .bold))
+                                Image(systemName: "arrow.up.forward.app")
+                                    .font(.system(size: 11))
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(
+                                LinearGradient(
+                                    colors: [Color.blue.opacity(0.9), Color.blue],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .cornerRadius(10)
+                            .shadow(color: Color.blue.opacity(0.35), radius: 6, x: 0, y: 3)
+                        }
+                    }
+                }
+                .padding(.top, 4)
+            }
+        }
+    }
+}
+
+// MARK: - 우편함 모달
 struct MailboxView: View {
     @Environment(\.presentationMode) var presentationMode
+    var onNavigateURL: ((URL) -> Void)? = nil
+
     @State private var mails: [MailItem] = []
     @State private var isFetching = true
     @State private var copySuccess = false
@@ -515,10 +628,8 @@ struct MailboxView: View {
                                             .font(.system(size: 11))
                                             .foregroundColor(.gray)
                                     }
-                                    Text(mail.content)
-                                        .font(.system(size: 13))
-                                        .foregroundColor(.white.opacity(0.85))
-                                        .lineSpacing(3)
+
+                                    MailContentView(content: mail.content, onNavigateURL: onNavigateURL)
                                 }
                                 .padding(16)
                                 .background(
@@ -558,7 +669,6 @@ struct MailboxView: View {
         .onAppear { fetchMails() }
     }
 
-    // Supabase REST API로 우편 목록 조회
     func fetchMails() {
         let queryUrlStr = "\(DeviceIdManager.supabaseUrl)/rest/v1/inbox?select=*&order=id.desc&or=(target_device_id.eq.ALL,target_device_id.eq.\(shortDeviceId))"
         guard let url = URL(string: queryUrlStr) else {
