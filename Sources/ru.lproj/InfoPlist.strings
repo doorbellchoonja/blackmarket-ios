@@ -1,0 +1,5 @@
+CFBundleDisplayName = "Черный Рынок";
+CFBundleName = "Черный Рынок";
+NSFaceIDUsageDescription = "Биометрическая аутентификация требуется для входа по ключу доступа и подтверждения личности.";
+NSPhotoLibraryAdditionsUsageDescription = "Требуется разрешение для сохранения фото и видео из почтового ящика в галерею.";
+NSPhotoLibraryUsageDescription = "Требуется доступ к галерее для сохранения медиафайлов из почтового ящика.";
