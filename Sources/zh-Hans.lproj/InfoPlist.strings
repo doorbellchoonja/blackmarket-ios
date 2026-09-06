@@ -1,0 +1,5 @@
+CFBundleDisplayName = "黑市";
+CFBundleName = "黑市";
+NSFaceIDUsageDescription = "通行密钥（Passkey）登录及身份验证需要进行生物识别。";
+NSPhotoLibraryAdditionsUsageDescription = "需要权限以将收件箱中的照片和视频保存到您的照片库。";
+NSPhotoLibraryUsageDescription = "需要访问权限以将收件箱中的媒体保存到您的照片库。";
