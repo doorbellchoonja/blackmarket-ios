@@ -79,79 +79,123 @@ struct DeviceIdManager {
     }
 }
 
-// MARK: - 사진 및 동영상 사진앱(Photos) 안전 저장 모듈
-class MediaSaveManager: NSObject, ObservableObject {
-    static let shared = MediaSaveManager()
+// MARK: - 미디어 다운로드 진행률 및 사진앱 정밀 저장 컨트롤러
+class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
+    static let shared = MediaDownloadManager()
 
-    // 사진 / GIF 저장
-    func saveImage(url: URL, completion: @escaping (Bool) -> Void) {
-        URLSession.shared.dataTask(with: url) { data, _, _ in
-            guard let data = data else {
-                DispatchQueue.main.async { completion(false) }
-                return
-            }
+    @Published var isDownloading: Bool = false
+    @Published var progress: Double = 0.0
+    @Published var loadedSizeText: String = "0.0MB / 0.0MB"
+    @Published var activeURL: URL? = nil
 
-            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-                guard status == .authorized || status == .limited else {
-                    DispatchQueue.main.async { completion(false) }
-                    return
-                }
+    private var completionHandler: ((Bool, String) -> Void)?
+    private var isVideoFile: Bool = false
 
-                PHPhotoLibrary.shared().performChanges({
-                    let creationRequest = PHAssetCreationRequest.forAsset()
-                    creationRequest.addResource(with: .photo, data: data, options: nil)
-                }) { success, error in
-                    DispatchQueue.main.async {
-                        completion(success)
-                    }
-                }
-            }
-        }.resume()
+    func downloadAndSave(url: URL, isVideo: Bool, completion: @escaping (Bool, String) -> Void) {
+        self.completionHandler = completion
+        self.isVideoFile = isVideo
+        self.activeURL = url
+        self.progress = 0.0
+        self.loadedSizeText = "0.0MB / 0.0MB"
+        self.isDownloading = true
+
+        let config = URLSessionConfiguration.default
+        let session = URLSession(configuration: config, delegate: self, delegateQueue: OperationQueue.main)
+        let task = session.downloadTask(with: url)
+        task.resume()
     }
 
-    // 동영상(mp4, mov) 사진앱 저장
-    func saveVideo(url: URL, completion: @escaping (Bool) -> Void) {
-        URLSession.shared.downloadTask(with: url) { localURL, _, error in
-            guard let localURL = localURL, error == nil else {
-                DispatchQueue.main.async { completion(false) }
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        if totalBytesExpectedToWrite > 0 {
+            let p = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
+            self.progress = p
+            let loadedMB = Double(totalBytesWritten) / (1024 * 1024)
+            let totalMB = Double(totalBytesExpectedToWrite) / (1024 * 1024)
+            self.loadedSizeText = String(format: "%.1fMB / %.1fMB", loadedMB, totalMB)
+        } else {
+            let loadedMB = Double(totalBytesWritten) / (1024 * 1024)
+            self.loadedSizeText = String(format: "%.1fMB 다운로드 중", loadedMB)
+        }
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        guard let sourceURL = self.activeURL else {
+            finishWithResult(success: false, message: "URL 정보가 없습니다.")
+            return
+        }
+
+        let ext = sourceURL.pathExtension.isEmpty ? (isVideoFile ? "mp4" : "png") : sourceURL.pathExtension
+        let tempDir = FileManager.default.temporaryDirectory
+        let destinationURL = tempDir.appendingPathComponent("\(UUID().uuidString).\(ext)")
+
+        do {
+            if FileManager.default.fileExists(atPath: destinationURL.path) {
+                try FileManager.default.removeItem(at: destinationURL)
+            }
+            try FileManager.default.copyItem(at: location, to: destinationURL)
+        } catch {
+            finishWithResult(success: false, message: "임시 파일 생성 실패: \(error.localizedDescription)")
+            return
+        }
+
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else {
+                try? FileManager.default.removeItem(at: destinationURL)
+                self.finishWithResult(success: false, message: "사진 앱 접근 권한이 없습니다. 설정에서 허용해주세요.")
                 return
             }
 
-            let fileExtension = url.pathExtension.isEmpty ? "mp4" : url.pathExtension
-            let tempDir = FileManager.default.temporaryDirectory
-            let targetURL = tempDir.appendingPathComponent("\(UUID().uuidString).\(fileExtension)")
-
-            do {
-                if FileManager.default.fileExists(atPath: targetURL.path) {
-                    try FileManager.default.removeItem(at: targetURL)
-                }
-                try FileManager.default.copyItem(at: localURL, to: targetURL)
-            } catch {
-                DispatchQueue.main.async { completion(false) }
-                return
-            }
-
-            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-                guard status == .authorized || status == .limited else {
-                    try? FileManager.default.removeItem(at: targetURL)
-                    DispatchQueue.main.async { completion(false) }
+            if self.isVideoFile {
+                if !UIVideoAtPathIsCompatibleWithSavedPhotosAlbum(destinationURL.path) {
+                    try? FileManager.default.removeItem(at: destinationURL)
+                    self.finishWithResult(success: false, message: "iOS 사진 앱과 호환되지 않는 비디오 코덱입니다.")
                     return
                 }
 
                 PHPhotoLibrary.shared().performChanges({
-                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: targetURL)
-                }) { success, _ in
-                    try? FileManager.default.removeItem(at: targetURL)
-                    DispatchQueue.main.async {
-                        completion(success)
-                    }
+                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: destinationURL)
+                }) { success, err in
+                    try? FileManager.default.removeItem(at: destinationURL)
+                    self.finishWithResult(success: success, message: success ? "사진 앱에 동영상이 정상 저장되었습니다." : (err?.localizedDescription ?? "저장 실패"))
+                }
+            } else {
+                guard let data = try? Data(contentsOf: destinationURL) else {
+                    try? FileManager.default.removeItem(at: destinationURL)
+                    self.finishWithResult(success: false, message: "이미지 데이터를 읽을 수 없습니다.")
+                    return
+                }
+
+                PHPhotoLibrary.shared().performChanges({
+                    let request = PHAssetCreationRequest.forAsset()
+                    request.addResource(with: .photo, data: data, options: nil)
+                }) { success, err in
+                    try? FileManager.default.removeItem(at: destinationURL)
+                    self.finishWithResult(success: success, message: success ? "사진 앱에 이미지가 정상 저장되었습니다." : (err?.localizedDescription ?? "저장 실패"))
                 }
             }
-        }.resume()
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error = error {
+            finishWithResult(success: false, message: "다운로드 오류: \(error.localizedDescription)")
+        }
+    }
+
+    private func finishWithResult(success: Bool, message: String) {
+        DispatchQueue.main.async {
+            self.isDownloading = false
+            self.activeURL = nil
+            if success {
+                let generator = UINotificationFeedbackGenerator()
+                generator.notificationOccurred(.success)
+            }
+            self.completionHandler?(success, message)
+        }
     }
 }
 
-// MARK: - Video.js 커스텀 웹킷 뷰어 (iOS 전체화면 강제 전환 차단 및 순수 인라인 테마 적용)
+// MARK: - Video.js 커스텀 웹킷 뷰어
 struct VideoJSPlayerView: UIViewRepresentable {
     let videoURL: URL
 
@@ -402,12 +446,12 @@ struct LiquidGlassNavigationBar: View {
     }
 }
 
-// MARK: - 이미지 전체화면 확대 뷰어 모달 (사진앱 저장 기능 탑재)
+// MARK: - 이미지 전체화면 확대 뷰어 모달 (프로그레스 바 탑재)
 struct FullScreenImageViewer: View {
     let imageURL: URL
     @Binding var isPresented: Bool
-    @State private var isSaved: Bool = false
-    @State private var isSaving: Bool = false
+    @ObservedObject var downloadManager = MediaDownloadManager.shared
+    @State private var toastMessage: String? = nil
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -427,34 +471,57 @@ struct FullScreenImageViewer: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            HStack(spacing: 14) {
-                Button(action: {
-                    guard !isSaving else { return }
-                    isSaving = true
-                    MediaSaveManager.shared.saveImage(url: imageURL) { success in
-                        isSaving = false
-                        if success {
-                            isSaved = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { isSaved = false }
+            VStack(alignment: .trailing, spacing: 12) {
+                HStack(spacing: 14) {
+                    if downloadManager.isDownloading && downloadManager.activeURL == imageURL {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text("\(Int(downloadManager.progress * 100))% (\(downloadManager.loadedSizeText))")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.blue)
+                            ProgressView(value: downloadManager.progress, total: 1.0)
+                                .frame(width: 110)
+                                .tint(.blue)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.7))
+                        .cornerRadius(8)
+                    } else {
+                        Button(action: {
+                            downloadManager.downloadAndSave(url: imageURL, isVideo: false) { success, msg in
+                                toastMessage = msg
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { toastMessage = nil }
+                            }
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "square.and.arrow.down")
+                                Text("사진앱 저장")
+                            }
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Color.blue)
+                            .clipShape(Capsule())
                         }
                     }
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: isSaved ? "checkmark" : "square.and.arrow.down")
-                        Text(isSaved ? "저장 완료" : "사진앱 저장")
+
+                    Button(action: { isPresented = false }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 28))
+                            .foregroundColor(.white.opacity(0.85))
                     }
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(isSaved ? Color.green : Color.blue)
-                    .clipShape(Capsule())
                 }
 
-                Button(action: { isPresented = false }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 26))
-                        .foregroundColor(.white.opacity(0.8))
+                if let toast = toastMessage {
+                    Text(toast)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.85))
+                        .cornerRadius(8)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.2), lineWidth: 0.8))
                 }
             }
             .padding(.top, 50)
@@ -463,14 +530,14 @@ struct FullScreenImageViewer: View {
     }
 }
 
-// MARK: - 우편 본문 정밀 파서 (Video.js + GIF/이미지 + 버튼 통합)
+// MARK: - 우편 본문 정밀 파서 (Video.js + 동영상 진행률 저장 바 + 액션 버튼)
 struct MailContentView: View {
     let content: String
     let onNavigateURL: ((URL) -> Void)?
 
+    @ObservedObject var downloadManager = MediaDownloadManager.shared
     @State private var selectedPreviewImage: URL? = nil
-    @State private var savedVideoURLs: Set<URL> = []
-    @State private var savingVideoURLs: Set<URL> = []
+    @State private var statusFeedbackText: [URL: String] = [:]
 
     struct ActionBtn: Identifiable {
         let id = UUID()
@@ -478,7 +545,6 @@ struct MailContentView: View {
         let url: URL
     }
 
-    // 1. [버튼명](링크) 파싱
     var parsedButtons: [ActionBtn] {
         let pattern = "\\[([^\\]]+)\\]\\((https?://[^\\)]+)\\)"
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
@@ -494,7 +560,6 @@ struct MailContentView: View {
         }
     }
 
-    // 2. 동영상 URL 파싱 (mp4, mov, webm, m4v)
     var parsedVideos: [URL] {
         let pattern = "(https?://[^\\s]+\\.(?:mp4|mov|webm|m4v))"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
@@ -507,7 +572,6 @@ struct MailContentView: View {
         }
     }
 
-    // 3. 사진 및 GIF URL 파싱 (png, jpg, jpeg, gif, webp)
     var parsedImages: [URL] {
         let pattern = "(https?://[^\\s]+\\.(?:png|jpg|jpeg|gif|webp))"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
@@ -520,7 +584,6 @@ struct MailContentView: View {
         }
     }
 
-    // 4. 순수 텍스트 본문 추출
     var cleanedText: String {
         var txt = content
         txt = txt.replacingOccurrences(of: "\\[([^\\]]+)\\]\\((https?://[^\\)]+)\\)", with: "", options: .regularExpression)
@@ -538,42 +601,56 @@ struct MailContentView: View {
                     .lineSpacing(4)
             }
 
-            // 동영상 (Video.js 뷰어 + 동영상 사진앱 저장)
+            // 동영상 (Video.js + 실시간 다운로드 프로그레스 바)
             ForEach(parsedVideos, id: \.self) { vidURL in
-                VStack(alignment: .trailing, spacing: 6) {
+                VStack(alignment: .trailing, spacing: 8) {
                     VideoJSPlayerView(videoURL: vidURL)
                         .frame(height: 200)
                         .cornerRadius(12)
                         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.15), lineWidth: 0.8))
 
-                    Button(action: {
-                        guard !savingVideoURLs.contains(vidURL) else { return }
-                        savingVideoURLs.insert(vidURL)
-                        MediaSaveManager.shared.saveVideo(url: vidURL) { success in
-                            savingVideoURLs.remove(vidURL)
-                            if success {
-                                savedVideoURLs.insert(vidURL)
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                                    savedVideoURLs.remove(vidURL)
-                                }
+                    if downloadManager.isDownloading && downloadManager.activeURL == vidURL {
+                        VStack(alignment: .trailing, spacing: 5) {
+                            HStack {
+                                Text("다운로드 중...")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.white)
+                                Spacer()
+                                Text("\(Int(downloadManager.progress * 100))% (\(downloadManager.loadedSizeText))")
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(.blue)
                             }
+                            ProgressView(value: downloadManager.progress, total: 1.0)
+                                .tint(.blue)
                         }
-                    }) {
-                        HStack(spacing: 5) {
-                            Image(systemName: savedVideoURLs.contains(vidURL) ? "checkmark" : "video.badge.plus")
-                            Text(savedVideoURLs.contains(vidURL) ? "동영상 저장 완료" : (savingVideoURLs.contains(vidURL) ? "저장 중..." : "사진앱에 동영상 저장"))
-                        }
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(savedVideoURLs.contains(vidURL) ? .green : .blue)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
+                        .padding(10)
                         .background(Color.white.opacity(0.06))
                         .cornerRadius(8)
+                    } else {
+                        Button(action: {
+                            downloadManager.downloadAndSave(url: vidURL, isVideo: true) { success, msg in
+                                statusFeedbackText[vidURL] = msg
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                                    statusFeedbackText.removeValue(forKey: vidURL)
+                                }
+                            }
+                        }) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "video.badge.plus")
+                                Text(statusFeedbackText[vidURL] ?? "사진앱에 동영상 저장")
+                            }
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(statusFeedbackText[vidURL] != nil ? .green : .blue)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(Color.white.opacity(0.06))
+                            .cornerRadius(8)
+                        }
                     }
                 }
             }
 
-            // 이미지 & GIF (탭 시 전체화면 확대 및 사진앱 저장 지원)
+            // 이미지 / GIF
             ForEach(parsedImages, id: \.self) { imgURL in
                 AsyncImage(url: imgURL) { phase in
                     switch phase {
@@ -593,7 +670,7 @@ struct MailContentView: View {
                 }
             }
 
-            // [버튼명](링크) 버튼 렌더링
+            // [버튼명](링크) 버튼
             if !parsedButtons.isEmpty {
                 VStack(spacing: 8) {
                     ForEach(parsedButtons) { btn in
