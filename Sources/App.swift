@@ -5,7 +5,64 @@ import AuthenticationServices
 import CryptoKit
 import QuickLook
 
-// MARK: - 지원 언어 및 자체 다국어 매니저 (파일 추가 없이 코드 내 완결)
+// MARK: - 뉴모피즘 디자인 시스템 팔레트 및 전용 익스텐션
+extension Color {
+    static let neuBackground = Color(red: 224/255, green: 229/255, blue: 236/255) // #E0E5EC
+    static let neuLightShadow = Color.white.opacity(0.9)
+    static let neuDarkShadow = Color(red: 163/255, green: 177/255, blue: 198/255).opacity(0.65)
+    static let neuTextMain = Color(red: 45/255, green: 55/255, blue: 72/255)
+    static let neuTextSub = Color(red: 100/255, green: 116/255, blue: 139/255)
+}
+
+struct NeuCardModifier: ViewModifier {
+    var cornerRadius: CGFloat = 20
+    var isPressed: Bool = false
+
+    func body(content: Content) -> some View {
+        content
+            .background(Color.neuBackground)
+            .cornerRadius(cornerRadius)
+            .shadow(color: Color.neuLightShadow, radius: isPressed ? 2 : 7, x: isPressed ? -2 : -6, y: isPressed ? -2 : -6)
+            .shadow(color: Color.neuDarkShadow, radius: isPressed ? 2 : 7, x: isPressed ? 2 : 6, y: isPressed ? 2 : 6)
+    }
+}
+
+struct NeuInsetModifier: ViewModifier {
+    var cornerRadius: CGFloat = 16
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .fill(Color.neuBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: cornerRadius)
+                            .stroke(Color.neuDarkShadow, lineWidth: 2)
+                            .blur(radius: 3)
+                            .offset(x: 2, y: 2)
+                            .mask(RoundedRectangle(cornerRadius: cornerRadius).fill(LinearGradient(colors: [Color.black, Color.clear], startPoint: .topLeading, endPoint: .bottomTrailing)))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: cornerRadius)
+                            .stroke(Color.neuLightShadow, lineWidth: 2)
+                            .blur(radius: 3)
+                            .offset(x: -2, y: -2)
+                            .mask(RoundedRectangle(cornerRadius: cornerRadius).fill(LinearGradient(colors: [Color.clear, Color.black], startPoint: .topLeading, endPoint: .bottomTrailing)))
+                    )
+            )
+    }
+}
+
+extension View {
+    func neuCard(cornerRadius: CGFloat = 20, isPressed: Bool = false) -> some View {
+        modifier(NeuCardModifier(cornerRadius: cornerRadius, isPressed: isPressed))
+    }
+    func neuInset(cornerRadius: CGFloat = 16) -> some View {
+        modifier(NeuInsetModifier(cornerRadius: cornerRadius))
+    }
+}
+
+// MARK: - 지원 언어 및 자체 다국어 매니저
 enum AppLanguage: String, CaseIterable, Identifiable {
     case ko = "ko"
     case en = "en"
@@ -42,86 +99,83 @@ class LocalizationManager: ObservableObject {
     }
 
     private let dictionary: [String: [AppLanguage: String]] = [
-        // 메인/공통
         "connecting": [
-            .ko: "연결 중...", .en: "CONNECTING...", .ja: "接続中...", .zh: "连接中...", .ru: "ПОДКЛЮЧЕНИЕ...", .fr: "CONNEXION..."
+            .ko: "시스템 초기화 중...", .en: "INITIALIZING...", .ja: "初期化中...", .zh: "初始化中...", .ru: "ИНИЦИАЛИЗАЦИЯ...", .fr: "INITIALISATION..."
         ],
         "close": [
             .ko: "닫기", .en: "Close", .ja: "閉じる", .zh: "关闭", .ru: "Закрыть", .fr: "Fermer"
         ],
         "settings": [
-            .ko: "설정", .en: "Settings", .ja: "設定", .zh: "设置", .ru: "Настройки", .fr: "Paramètres"
+            .ko: "환경설정", .en: "Settings", .ja: "設定", .zh: "设置", .ru: "Настройки", .fr: "Paramètres"
         ],
         "language_setting": [
             .ko: "언어 설정", .en: "Language", .ja: "言語設定", .zh: "语言设置", .ru: "Язык", .fr: "Langue"
         ],
         "language_sub": [
-            .ko: "앱 내 모든 인터페이스 언어를 변경합니다.",
+            .ko: "앱의 모든 인터페이스 언어를 실시간으로 변경합니다.",
             .en: "Change all application interface languages.",
             .ja: "アプリ内のすべての言語を変更します。",
             .zh: "更改应用内的所有界面语言。",
             .ru: "Изменить язык интерфейса приложения.",
-            .fr: "Modifier la langue de l'interface de l'application."
+            .fr: "Modifier la langue de l'interface."
         ],
-        // 우편함
         "mailbox": [
             .ko: "우편함", .en: "Mailbox", .ja: "受信箱", .zh: "收件箱", .ru: "Почтовый ящик", .fr: "Boîte de réception"
         ],
         "mailbox_sub": [
-            .ko: "새로운 공지 및 개별 메시지를 확인합니다.",
-            .en: "Check notices and private messages.",
-            .ja: "新しいお知らせや個別メッセージを確認します。",
+            .ko: "도착한 메시지와 공지를 확인합니다.",
+            .en: "Check incoming notices and messages.",
+            .ja: "届いたメッセージやお知らせを確認します。",
             .zh: "查看新公告和个人私信。",
-            .ru: "Просматривайте уведомления и личные сообщения.",
-            .fr: "Consultez les annonces et les messages privés."
+            .ru: "Просматривайте уведомления и сообщения.",
+            .fr: "Consultez les annonces et messages reçus."
         ],
         "copy_number": [
             .ko: "번호 복사", .en: "Copy ID", .ja: "番号コピー", .zh: "复制编号", .ru: "Копировать ID", .fr: "Copier ID"
         ],
         "copied": [
-            .ko: "복사됨!", .en: "Copied!", .ja: "コピー完了!", .zh: "已复制!", .ru: "Скопировано!", .fr: "Copié !"
+            .ko: "복사 완료!", .en: "Copied!", .ja: "コピー完了!", .zh: "已复制!", .ru: "Скопировано!", .fr: "Copié !"
         ],
         "empty_mailbox": [
-            .ko: "받은 우편이 없습니다.", .en: "No mails available.", .ja: "受信した郵便はありません。", .zh: "暂无收到的邮件。", .ru: "Писем нет.", .fr: "Aucun courrier reçu."
+            .ko: "수신된 우편이 없습니다.", .en: "Mailbox is empty.", .ja: "受信した郵便はありません。", .zh: "暂无收到的邮件。", .ru: "Почтовый ящик пуст.", .fr: "Boîte de réception vide."
         ],
         "download_and_preview": [
-            .ko: "동영상 다운로드 및 미리보기", .en: "Download & Preview Video", .ja: "動画をダウンロードしてプレビュー", .zh: "下载并预览视频", .ru: "Скачать и посмотреть видео", .fr: "Télécharger et prévisualiser la vidéo"
+            .ko: "다운로드 및 미리보기", .en: "Download & Preview", .ja: "ダウンロードしてプレビュー", .zh: "下载并预览", .ru: "Скачать и посмотреть", .fr: "Télécharger et prévisualiser"
         ],
         "open_preview": [
             .ko: "미리보기 열기", .en: "Open Preview", .ja: "プレビューを開く", .zh: "打开预览", .ru: "Открыть просмотр", .fr: "Ouvrir l'aperçu"
         ],
         "downloaded_tag": [
-            .ko: "다운로드 완료됨", .en: "Downloaded", .ja: "ダウンロード完了", .zh: "已下载", .ru: "Скачано", .fr: "Téléchargé"
+            .ko: "로컬 저장됨", .en: "Cached", .ja: "保存済み", .zh: "已保存", .ru: "Сохранено", .fr: "Enregistré"
         ],
         "downloading": [
-            .ko: "다운로드 중...", .en: "Downloading...", .ja: "ダウンロード中...", .zh: "下载中...", .ru: "Загрузка...", .fr: "Téléchargement..."
+            .ko: "전송 중...", .en: "Downloading...", .ja: "受信中...", .zh: "下载中...", .ru: "Загрузка...", .fr: "Téléchargement..."
         ],
-        // 앱 정보
-        "drag_shield_hint": [
-            .ko: "방패를 손가락으로 드래그하여 회전시켜보세요",
-            .en: "Drag the shield with your finger to rotate it",
-            .ja: "指でシールドをドラッグして回転させてみてください",
-            .zh: "用手指拖动盾牌进行旋转",
-            .ru: "Проведите пальцем по щиту, чтобы повернуть его",
-            .fr: "Faites glisser le bouclier avec votre doigt pour le faire pivoter"
+        "drag_dial_hint": [
+            .ko: "가운데 노브를 손가락바람개비처럼 돌려보세요",
+            .en: "Rotate the central skeuomorphic knob",
+            .ja: "中央のノブを指で回してみてください",
+            .zh: "用手指旋转中央旋钮",
+            .ru: "Поверните центральный регулятор пальцем",
+            .fr: "Faites pivoter le bouton rotatif central"
         ],
         "app_version": [
-            .ko: "애플리케이션 버전", .en: "Application Version", .ja: "アプリバージョン", .zh: "应用程序版本", .ru: "Версия приложения", .fr: "Version de l'application"
+            .ko: "소프트웨어 버전", .en: "Software Version", .ja: "ソフトウェアバージョン", .zh: "软件版本", .ru: "Версия ПО", .fr: "Version logicielle"
         ],
         "build_number": [
-            .ko: "빌드 번호", .en: "Build Number", .ja: "ビルド番号", .zh: "内部版本号", .ru: "Номер сборки", .fr: "Numéro de build"
+            .ko: "빌드 넘버", .en: "Build Number", .ja: "ビルド番号", .zh: "构建编号", .ru: "Номер сборки", .fr: "Numéro de build"
         ],
         "device_model": [
-            .ko: "기기 식별 모델", .en: "Device Model", .ja: "端末識別モデル", .zh: "设备识别型号", .ru: "Модель устройства", .fr: "Modèle de l'appareil"
+            .ko: "하드웨어 모델", .en: "Hardware Model", .ja: "端末モデル", .zh: "硬件型号", .ru: "Модель устройства", .fr: "Modèle matériel"
         ],
         "passkey_auth": [
-            .ko: "생체인증 패스키", .en: "Passkey Biometrics", .ja: "生体認証パスキー", .zh: "生物识别通行密钥", .ru: "Биометрический ключ", .fr: "Clé d'accès biométrique"
+            .ko: "생체 보안 모듈", .en: "Biometric Security", .ja: "生体認証モジュール", .zh: "生物识别模块", .ru: "Биометрия", .fr: "Module biométrique"
         ],
         "passkey_disabled": [
-            .ko: "비활성화됨", .en: "Disabled", .ja: "無効", .zh: "已停用", .ru: "Отключено", .fr: "Désactivé"
+            .ko: "대기 상태", .en: "Standby", .ja: "待機中", .zh: "待机中", .ru: "Режим ожидания", .fr: "En veille"
         ],
         "security_sandbox": [
-            .ko: "보안 샌드박스", .en: "Security Sandbox", .ja: "セキュリティサンドボックス", .zh: "安全沙盒", .ru: "Песочница безопасности", .fr: "Bac à sable de sécurité"
+            .ko: "보안 터널", .en: "Encrypted Tunnel", .ja: "暗号化トンネル", .zh: "加密隧道", .ru: "Зашифрованный туннель", .fr: "Tunnel sécurisé"
         ]
     ]
 
@@ -142,7 +196,6 @@ struct MailItem: Identifiable, Codable {
 // MARK: - 기기 식별자 & Supabase 연동 모듈
 struct DeviceIdManager {
     private static let salt = "BM_DEVICE_SALT_2026"
-
     static let supabaseUrl = "https://xirtaynusdyvtntlodpz.supabase.co"
     static let supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhpcnRheW51c2R5dnRudGxvZHB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2MTQ5NTUsImV4cCI6MjEwNDE5MDk1NX0.RCiocVn7PZQnWHnyN8tGQ08AV5M5ZbvvIKB6-eQRseI"
 
@@ -268,7 +321,7 @@ class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelega
             self.loadedSizeText = String(format: "%.1fMB / %.1fMB", loadedMB, totalMB)
         } else {
             let loadedMB = Double(totalBytesWritten) / (1024 * 1024)
-            self.loadedSizeText = String(format: "%.1fMB", loadedMB)
+            self.loadedSizeText = String(format: "%.1fMB 다운로드 중", loadedMB)
         }
     }
 
@@ -310,7 +363,7 @@ class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelega
     }
 }
 
-// MARK: - 닫기 버튼이 포함된 QuickLook 뷰어
+// MARK: - 시스템 QuickLook 뷰어
 struct QuickLookPreviewView: UIViewControllerRepresentable {
     let fileURL: URL
     @Environment(\.presentationMode) var presentationMode
@@ -344,13 +397,9 @@ struct QuickLookPreviewView: UIViewControllerRepresentable {
 
     class Coordinator: NSObject, QLPreviewControllerDataSource {
         let parent: QuickLookPreviewView
-        init(_ parent: QuickLookPreviewView) {
-            self.parent = parent
-        }
+        init(_ parent: QuickLookPreviewView) { self.parent = parent }
 
-        func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
-            return 1
-        }
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
 
         func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
             return parent.fileURL as QLPreviewItem
@@ -389,9 +438,9 @@ struct VideoJSPlayerView: UIViewRepresentable {
                 html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
                 .video-js { width: 100% !important; height: 100% !important; }
                 .video-js .vjs-tech { object-fit: contain; }
-                .vjs-control-bar { background: rgba(15, 15, 20, 0.75) !important; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-radius: 0 0 10px 10px; }
+                .vjs-control-bar { background: rgba(224, 229, 236, 0.8) !important; backdrop-filter: blur(12px); color: #334155 !important; }
                 .vjs-play-progress, .vjs-volume-level { background-color: #3b82f6 !important; }
-                .vjs-big-play-button { border-radius: 50% !important; width: 50px !important; height: 50px !important; line-height: 50px !important; border: 2px solid rgba(255,255,255,0.8) !important; background: rgba(0,0,0,0.6) !important; margin-left: -25px !important; margin-top: -25px !important; }
+                .vjs-big-play-button { border-radius: 50% !important; width: 54px !important; height: 54px !important; line-height: 54px !important; border: none !important; background: rgba(224, 229, 236, 0.9) !important; color: #2563eb !important; margin-left: -27px !important; margin-top: -27px !important; box-shadow: 4px 4px 10px rgba(163,177,198,0.7), -4px -4px 10px rgba(255,255,255,0.9) !important; }
             </style>
         </head>
         <body>
@@ -464,10 +513,10 @@ struct BlackMarketApp: App {
         WindowGroup {
             GeometryReader { geometry in
                 ZStack(alignment: .bottom) {
-                    Color.black.edgesIgnoringSafeArea(.all)
+                    Color.neuBackground.edgesIgnoringSafeArea(.all)
 
                     VStack(spacing: 0) {
-                        Color.black.frame(height: geometry.safeAreaInsets.top)
+                        Color.neuBackground.frame(height: geometry.safeAreaInsets.top)
                         WebViewContainer(
                             url: currentURL,
                             isLoading: $isLoading,
@@ -478,7 +527,8 @@ struct BlackMarketApp: App {
                     }
                     .edgesIgnoringSafeArea(.all)
 
-                    LiquidGlassNavigationBar(
+                    // 하단 뉴모피즘 햅틱 플로팅 도크
+                    SkeuoNavigationBar(
                         canGoBack: canGoBack,
                         canGoForward: canGoForward,
                         onBack: { webAction = .goBack },
@@ -488,12 +538,12 @@ struct BlackMarketApp: App {
                         onSettings: { showSettingsSheet = true },
                         onInfo: { showInfoSheet = true }
                     )
-                    .padding(.bottom, max(geometry.safeAreaInsets.bottom, 16) + 28)
-                    .padding(.horizontal, 20)
+                    .padding(.bottom, max(geometry.safeAreaInsets.bottom, 16) + 24)
+                    .padding(.horizontal, 24)
 
                     if isLoading {
-                        CustomLoadingOverlay()
-                            .transition(.opacity.animation(.easeOut(duration: 0.2)))
+                        SkeuoLoadingOverlay()
+                            .transition(.opacity.animation(.easeOut(duration: 0.25)))
                             .zIndex(2)
                     }
                 }
@@ -536,8 +586,8 @@ struct BlackMarketApp: App {
     }
 }
 
-// MARK: - 하단 리퀴드 글래스 컨트롤 바 (설정 톱니바퀴 추가)
-struct LiquidGlassNavigationBar: View {
+// MARK: - 하단 뉴모피즘 입체 컨트롤 바
+struct SkeuoNavigationBar: View {
     let canGoBack: Bool
     let canGoForward: Bool
     let onBack: () -> Void
@@ -549,121 +599,74 @@ struct LiquidGlassNavigationBar: View {
 
     var body: some View {
         HStack(spacing: 20) {
-            Button(action: onBack) {
-                Image(systemName: "chevron.backward")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(canGoBack ? .white : .white.opacity(0.25))
-            }
-            .disabled(!canGoBack)
+            skeuoIconButton(icon: "chevron.backward", isEnabled: canGoBack, action: onBack)
+            skeuoIconButton(icon: "chevron.forward", isEnabled: canGoForward, action: onForward)
 
-            Button(action: onForward) {
-                Image(systemName: "chevron.forward")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(canGoForward ? .white : .white.opacity(0.25))
-            }
-            .disabled(!canGoForward)
+            Rectangle()
+                .fill(LinearGradient(colors: [Color.neuDarkShadow, Color.neuLightShadow], startPoint: .top, endPoint: .bottom))
+                .frame(width: 2, height: 18)
+                .cornerRadius(1)
 
-            Divider()
-                .frame(width: 1, height: 16)
-                .background(Color.white.opacity(0.2))
-
-            Button(action: onReload) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.85))
-            }
-
-            Button(action: onMail) {
-                Image(systemName: "envelope.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.85))
-            }
-
-            // 설정 버튼
-            Button(action: onSettings) {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.85))
-            }
-
-            Button(action: onInfo) {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.white.opacity(0.85))
-            }
+            skeuoIconButton(icon: "arrow.clockwise", action: onReload)
+            skeuoIconButton(icon: "envelope.fill", action: onMail)
+            skeuoIconButton(icon: "gearshape.fill", action: onSettings)
+            skeuoIconButton(icon: "info.circle.fill", action: onInfo)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(
-            ZStack {
-                BlurView(style: .systemUltraThinMaterialDark)
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color.white.opacity(0.18),
-                        Color.white.opacity(0.04),
-                        Color.clear
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
-        )
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.6),
-                            Color.white.opacity(0.1),
-                            Color.white.opacity(0.05),
-                            Color.white.opacity(0.25)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 0.8
-                )
-        )
-        .shadow(color: Color.black.opacity(0.4), radius: 18, x: 0, y: 8)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 14)
+        .neuCard(cornerRadius: 32)
+    }
+
+    func skeuoIconButton(icon: String, isEnabled: Bool = true, action: @escaping () -> Void) -> some View {
+        Button(action: {
+            let gen = UIImpactFeedbackGenerator(style: .light)
+            gen.impactOccurred()
+            action()
+        }) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(isEnabled ? Color.neuTextMain : Color.neuTextSub.opacity(0.4))
+                .frame(width: 32, height: 32)
+        }
+        .disabled(!isEnabled)
     }
 }
 
-// MARK: - 설정 모달 (언어 실시간 변경)
+// MARK: - 설정 모달 (뉴모피즘 스타일)
 struct SettingsView: View {
     @Environment(\.presentationMode) var presentationMode
     @ObservedObject var langMgr = LocalizationManager.shared
 
     var body: some View {
         ZStack {
-            Color(red: 0.05, green: 0.05, blue: 0.07).edgesIgnoringSafeArea(.all)
+            Color.neuBackground.edgesIgnoringSafeArea(.all)
 
             VStack(spacing: 20) {
                 Capsule()
-                    .fill(Color.white.opacity(0.25))
-                    .frame(width: 36, height: 4)
-                    .padding(.top, 12)
+                    .fill(Color.neuDarkShadow)
+                    .frame(width: 40, height: 5)
+                    .padding(.top, 14)
 
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(langMgr.tr("settings"))
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundColor(.white)
+                            .font(.system(size: 22, weight: .heavy))
+                            .foregroundColor(Color.neuTextMain)
                         Text(langMgr.tr("language_sub"))
                             .font(.system(size: 12))
-                            .foregroundColor(.gray)
+                            .foregroundColor(Color.neuTextSub)
                     }
                     Spacer()
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 24)
 
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     Text(langMgr.tr("language_setting"))
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(.blue)
                         .padding(.horizontal, 4)
 
-                    VStack(spacing: 4) {
+                    VStack(spacing: 10) {
                         ForEach(AppLanguage.allCases) { lang in
                             Button(action: {
                                 langMgr.currentLanguage = lang
@@ -672,60 +675,43 @@ struct SettingsView: View {
                             }) {
                                 HStack {
                                     Text(lang.displayName)
-                                        .font(.system(size: 14, weight: langMgr.currentLanguage == lang ? .bold : .medium))
-                                        .foregroundColor(langMgr.currentLanguage == lang ? .white : .gray)
+                                        .font(.system(size: 14, weight: langMgr.currentLanguage == lang ? .bold : .semibold))
+                                        .foregroundColor(langMgr.currentLanguage == lang ? .blue : Color.neuTextMain)
                                     Spacer()
                                     if langMgr.currentLanguage == lang {
                                         Image(systemName: "checkmark.circle.fill")
                                             .foregroundColor(.blue)
-                                            .font(.system(size: 16))
+                                            .font(.system(size: 17))
                                     }
                                 }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 13)
-                                .background(langMgr.currentLanguage == lang ? Color.white.opacity(0.08) : Color.clear)
-                                .cornerRadius(10)
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 14)
+                                .background(Color.neuBackground)
+                                .neuCard(cornerRadius: 16, isPressed: langMgr.currentLanguage == lang)
                             }
                         }
                     }
-                    .padding(6)
-                    .background(
-                        ZStack {
-                            BlurView(style: .systemThinMaterialDark)
-                            Color.white.opacity(0.03)
-                        }
-                    )
-                    .cornerRadius(16)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
-                    )
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 24)
 
                 Spacer()
 
                 Button(action: { presentationMode.wrappedValue.dismiss() }) {
                     Text(langMgr.tr("close"))
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.white)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(Color.neuTextMain)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.white.opacity(0.1))
-                        .cornerRadius(14)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(Color.white.opacity(0.2), lineWidth: 0.8)
-                        )
+                        .padding(.vertical, 16)
+                        .neuCard(cornerRadius: 18)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
             }
         }
     }
 }
 
-// MARK: - 우편 본문 뷰
+// MARK: - 우편 본문 뷰 (뉴모피즘 카드)
 struct MailContentView: View {
     let content: String
     let onNavigateURL: ((URL) -> Void)?
@@ -789,11 +775,11 @@ struct MailContentView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             if !cleanedText.isEmpty {
                 Text(cleanedText)
-                    .font(.system(size: 13))
-                    .foregroundColor(.white.opacity(0.9))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(Color.neuTextMain)
                     .lineSpacing(4)
             }
 
@@ -801,18 +787,18 @@ struct MailContentView: View {
             ForEach(parsedVideos, id: \.self) { vidURL in
                 let isCached = downloadManager.isMediaCached(for: vidURL)
 
-                VStack(alignment: .trailing, spacing: 8) {
+                VStack(alignment: .trailing, spacing: 10) {
                     VideoJSPlayerView(videoURL: vidURL)
                         .frame(height: 200)
-                        .cornerRadius(12)
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.15), lineWidth: 0.8))
+                        .cornerRadius(16)
+                        .neuInset(cornerRadius: 16)
 
                     if downloadManager.isDownloading && downloadManager.activeURL == vidURL {
-                        VStack(alignment: .trailing, spacing: 5) {
+                        VStack(alignment: .trailing, spacing: 6) {
                             HStack {
                                 Text(langMgr.tr("downloading"))
                                     .font(.system(size: 11, weight: .bold))
-                                    .foregroundColor(.white)
+                                    .foregroundColor(Color.neuTextMain)
                                 Spacer()
                                 Text("\(Int(downloadManager.progress * 100))% (\(downloadManager.loadedSizeText))")
                                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
@@ -821,9 +807,8 @@ struct MailContentView: View {
                             ProgressView(value: downloadManager.progress, total: 1.0)
                                 .tint(.blue)
                         }
-                        .padding(10)
-                        .background(Color.white.opacity(0.06))
-                        .cornerRadius(8)
+                        .padding(12)
+                        .neuInset(cornerRadius: 12)
                     } else {
                         Button(action: {
                             downloadManager.downloadOrGetMedia(url: vidURL, isVideo: true) { localURL in
@@ -833,16 +818,15 @@ struct MailContentView: View {
                                 }
                             }
                         }) {
-                            HStack(spacing: 5) {
-                                Image(systemName: isCached ? "play.circle.fill" : "arrow.down.circle")
+                            HStack(spacing: 6) {
+                                Image(systemName: isCached ? "play.circle.fill" : "arrow.down.circle.fill")
                                 Text(isCached ? langMgr.tr("open_preview") : langMgr.tr("download_and_preview"))
                             }
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(isCached ? .green : .blue)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(Color.white.opacity(0.06))
-                            .cornerRadius(8)
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(isCached ? Color(red: 16/255, green: 185/255, blue: 129/255) : .blue)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .neuCard(cornerRadius: 12)
                         }
                     }
                 }
@@ -858,8 +842,8 @@ struct MailContentView: View {
                         case .success(let img):
                             img.resizable()
                                 .scaledToFit()
-                                .cornerRadius(10)
-                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.15), lineWidth: 0.8))
+                                .cornerRadius(14)
+                                .neuCard(cornerRadius: 14)
                                 .onTapGesture {
                                     downloadManager.downloadOrGetMedia(url: imgURL, isVideo: false) { localURL in
                                         if let localURL = localURL {
@@ -869,7 +853,7 @@ struct MailContentView: View {
                                     }
                                 }
                         case .empty:
-                            ProgressView().colorScheme(.dark).frame(height: 120)
+                            ProgressView().frame(height: 120)
                         default:
                             EmptyView()
                         }
@@ -886,13 +870,13 @@ struct MailContentView: View {
                         }
                     } else if isCached {
                         Text(langMgr.tr("downloaded_tag"))
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.gray.opacity(0.8))
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(Color.neuTextSub)
                     }
                 }
             }
 
-            // 버튼 렌더링
+            // 링크 액션 버튼 (스큐어모피즘 입체 팝업 버튼)
             if !parsedButtons.isEmpty {
                 VStack(spacing: 8) {
                     ForEach(parsedButtons) { btn in
@@ -903,20 +887,12 @@ struct MailContentView: View {
                                 Text(btn.label)
                                     .font(.system(size: 13, weight: .bold))
                                 Image(systemName: "arrow.up.forward.app")
-                                    .font(.system(size: 11))
+                                    .font(.system(size: 12))
                             }
-                            .foregroundColor(.white)
+                            .foregroundColor(.blue)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 11)
-                            .background(
-                                LinearGradient(
-                                    colors: [Color.blue.opacity(0.9), Color.blue],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .cornerRadius(10)
-                            .shadow(color: Color.blue.opacity(0.35), radius: 6, x: 0, y: 3)
+                            .padding(.vertical, 12)
+                            .neuCard(cornerRadius: 14)
                         }
                     }
                 }
@@ -953,27 +929,28 @@ struct MailboxView: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.05, green: 0.05, blue: 0.07).edgesIgnoringSafeArea(.all)
+            Color.neuBackground.edgesIgnoringSafeArea(.all)
 
             VStack(spacing: 16) {
                 Capsule()
-                    .fill(Color.white.opacity(0.25))
-                    .frame(width: 36, height: 4)
-                    .padding(.top, 12)
+                    .fill(Color.neuDarkShadow)
+                    .frame(width: 40, height: 5)
+                    .padding(.top, 14)
 
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(langMgr.tr("mailbox"))
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundColor(.white)
+                            .font(.system(size: 22, weight: .heavy))
+                            .foregroundColor(Color.neuTextMain)
                         Text(langMgr.tr("mailbox_sub"))
                             .font(.system(size: 12))
-                            .foregroundColor(.gray)
+                            .foregroundColor(Color.neuTextSub)
                     }
                     Spacer()
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 24)
 
+                // 기기 식별자 음각 패널
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Text(deviceModelName)
@@ -987,88 +964,72 @@ struct MailboxView: View {
                         }) {
                             Text(copySuccess ? langMgr.tr("copied") : langMgr.tr("copy_number"))
                                 .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(copySuccess ? .green : .blue)
+                                .foregroundColor(copySuccess ? Color.green : .blue)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .neuCard(cornerRadius: 8)
                         }
                     }
                     Text(shortDeviceId)
-                        .font(.system(size: 17, weight: .black, design: .monospaced))
-                        .foregroundColor(.white)
+                        .font(.system(size: 18, weight: .heavy, design: .monospaced))
+                        .foregroundColor(Color.neuTextMain)
                         .tracking(3)
                 }
-                .padding(14)
-                .background(Color.white.opacity(0.04))
-                .cornerRadius(12)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
-                )
-                .padding(.horizontal, 20)
+                .padding(16)
+                .neuInset(cornerRadius: 18)
+                .padding(.horizontal, 24)
 
                 if isFetching {
                     Spacer()
-                    ProgressView().colorScheme(.dark)
+                    ProgressView()
                     Spacer()
                 } else if mails.isEmpty {
                     Spacer()
-                    VStack(spacing: 8) {
+                    VStack(spacing: 10) {
                         Image(systemName: "tray")
-                            .font(.system(size: 36))
-                            .foregroundColor(.gray.opacity(0.5))
+                            .font(.system(size: 38))
+                            .foregroundColor(Color.neuTextSub.opacity(0.6))
                         Text(langMgr.tr("empty_mailbox"))
-                            .font(.system(size: 14))
-                            .foregroundColor(.gray)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(Color.neuTextSub)
                     }
                     Spacer()
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 12) {
+                        LazyVStack(spacing: 16) {
                             ForEach(mails) { mail in
-                                VStack(alignment: .leading, spacing: 8) {
+                                VStack(alignment: .leading, spacing: 10) {
                                     HStack {
                                         Text(mail.title)
                                             .font(.system(size: 15, weight: .bold))
-                                            .foregroundColor(.white)
+                                            .foregroundColor(Color.neuTextMain)
                                         Spacer()
                                         Text(mail.date)
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.gray)
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundColor(Color.neuTextSub)
                                     }
 
                                     MailContentView(content: mail.content, onNavigateURL: onNavigateURL)
                                 }
-                                .padding(16)
-                                .background(
-                                    ZStack {
-                                        BlurView(style: .systemThinMaterialDark)
-                                        Color.white.opacity(0.03)
-                                    }
-                                )
-                                .cornerRadius(14)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 14)
-                                        .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
-                                )
+                                .padding(18)
+                                .neuCard(cornerRadius: 20)
                             }
                         }
-                        .padding(.horizontal, 20)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 4)
                     }
                 }
 
                 Button(action: { presentationMode.wrappedValue.dismiss() }) {
                     Text(langMgr.tr("close"))
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.white)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(Color.neuTextMain)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.white.opacity(0.1))
-                        .cornerRadius(14)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(Color.white.opacity(0.2), lineWidth: 0.8)
-                        )
+                        .padding(.vertical, 16)
+                        .neuCard(cornerRadius: 18)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
             }
         }
         .onAppear { fetchMails() }
@@ -1098,13 +1059,6 @@ struct MailboxView: View {
     }
 }
 
-// MARK: - UIKit 블러 뷰
-struct BlurView: UIViewRepresentable {
-    let style: UIBlurEffect.Style
-    func makeUIView(context: Context) -> UIVisualEffectView { UIVisualEffectView(effect: UIBlurEffect(style: style)) }
-    func updateUIView(_ uiView: UIVisualEffectView, context: Context) { uiView.effect = UIBlurEffect(style: style) }
-}
-
 // MARK: - 웹뷰
 struct WebViewContainer: UIViewRepresentable {
     let url: URL
@@ -1132,7 +1086,7 @@ struct WebViewContainer: UIViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
-        webView.backgroundColor = .black
+        webView.backgroundColor = UIColor(Color.neuBackground)
         webView.isOpaque = false
         webView.scrollView.bounces = true
         webView.scrollView.contentInsetAdjustmentBehavior = .never
@@ -1177,23 +1131,17 @@ struct WebViewContainer: UIViewRepresentable {
         func setupProgressObserver(for webView: WKWebView) {
             progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] webView, _ in
                 if webView.estimatedProgress >= 0.3 {
-                    DispatchQueue.main.async {
-                        self?.parent.isLoading = false
-                    }
+                    DispatchQueue.main.async { self?.parent.isLoading = false }
                 }
             }
         }
 
         func setupHistoryObserver(for webView: WKWebView) {
             backObservation = webView.observe(\.canGoBack, options: [.new]) { [weak self] webView, _ in
-                DispatchQueue.main.async {
-                    self?.parent.canGoBack = webView.canGoBack
-                }
+                DispatchQueue.main.async { self?.parent.canGoBack = webView.canGoBack }
             }
             forwardObservation = webView.observe(\.canGoForward, options: [.new]) { [weak self] webView, _ in
-                DispatchQueue.main.async {
-                    self?.parent.canGoForward = webView.canGoForward
-                }
+                DispatchQueue.main.async { self?.parent.canGoForward = webView.canGoForward }
             }
         }
 
@@ -1307,186 +1255,165 @@ struct WebViewContainer: UIViewRepresentable {
     }
 }
 
-// MARK: - 로딩 오버레이
-struct CustomLoadingOverlay: View {
+// MARK: - 뉴모피즘 로딩 오버레이 (사진 속 회전 노브 형상화)
+struct SkeuoLoadingOverlay: View {
     @ObservedObject var langMgr = LocalizationManager.shared
-    @State private var isPulsing = false
     @State private var rotateDegree: Double = 0
 
     var body: some View {
         ZStack {
-            Color.black.edgesIgnoringSafeArea(.all)
-            VStack(spacing: 20) {
+            Color.neuBackground.edgesIgnoringSafeArea(.all)
+            VStack(spacing: 24) {
                 ZStack {
                     Circle()
-                        .stroke(
-                            LinearGradient(colors: [Color.white.opacity(0.8), Color.gray.opacity(0.2)], startPoint: .topLeading, endPoint: .bottomTrailing),
-                            lineWidth: 2.5
-                        )
-                        .frame(width: 76, height: 76)
-                        .rotationEffect(.degrees(rotateDegree))
-                        .scaleEffect(isPulsing ? 1.03 : 0.97)
+                        .fill(Color.neuBackground)
+                        .frame(width: 90, height: 90)
+                        .neuCard(cornerRadius: 45)
 
-                    VStack(spacing: 1) {
-                        Text("BLACK").font(.system(size: 14, weight: .heavy, design: .monospaced)).foregroundColor(.white).tracking(2.5)
-                        Text("MARKET").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundColor(.gray).tracking(1.8)
-                    }
+                    // 중앙 다이얼 노브 닷
+                    Circle()
+                        .fill(Color.blue)
+                        .frame(width: 10, height: 10)
+                        .offset(y: -30)
+                        .rotationEffect(.degrees(rotateDegree))
+
+                    Image(systemName: "dial.low.fill")
+                        .font(.system(size: 26))
+                        .foregroundColor(Color.neuTextMain.opacity(0.8))
                 }
-                Text(langMgr.tr("connecting")).font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundColor(.gray.opacity(0.8)).tracking(2)
+
+                Text(langMgr.tr("connecting"))
+                    .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                    .foregroundColor(Color.neuTextSub)
+                    .tracking(2)
             }
         }
         .onAppear {
-            withAnimation(.linear(duration: 1.0).repeatForever(autoreverses: false)) { rotateDegree = 360 }
-            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) { isPulsing = true }
+            withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
+                rotateDegree = 360
+            }
         }
     }
 }
 
-// MARK: - 앱 정보 모달 (방패 6번 터치 이스터에그)
+// MARK: - 스큐어모피즘 턴테이블 노브 모달 (앱 정보)
 struct AppInfoView: View {
     @Environment(\.presentationMode) var presentationMode
     @ObservedObject var langMgr = LocalizationManager.shared
     var onEasterEggTriggered: (() -> Void)? = nil
 
-    @State private var dragRotationX: Double = 0
-    @State private var dragRotationY: Double = 0
+    @State private var knobRotation: Double = 0
     @State private var tapCount: Int = 0
-    @State private var lastTapTime: Date = Date()
 
     var appVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0" }
     var buildNumber: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1" }
 
     var body: some View {
         ZStack {
-            Color(red: 0.05, green: 0.05, blue: 0.07).edgesIgnoringSafeArea(.all)
+            Color.neuBackground.edgesIgnoringSafeArea(.all)
 
-            VStack(spacing: 24) {
+            VStack(spacing: 22) {
                 Capsule()
-                    .fill(Color.white.opacity(0.25))
-                    .frame(width: 36, height: 4)
-                    .padding(.top, 12)
+                    .fill(Color.neuDarkShadow)
+                    .frame(width: 40, height: 5)
+                    .padding(.top, 14)
 
+                // 스크린샷 상단과 동일한 스큐어모피즘 센터 노브(Knob)
                 VStack(spacing: 12) {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.white.opacity(0.15), Color.white.opacity(0.03)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 80, height: 80)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                    .stroke(Color.white.opacity(0.35), lineWidth: 1)
-                            )
-                            .shadow(color: Color.blue.opacity(0.2), radius: 15, x: 0, y: 5)
-                        
-                        Image(systemName: "shield.lefthalf.filled")
-                            .font(.system(size: 38))
-                            .foregroundColor(.white)
-                    }
-                    .rotation3DEffect(.degrees(dragRotationX), axis: (x: 1.0, y: 0.0, z: 0.0))
-                    .rotation3DEffect(.degrees(dragRotationY), axis: (x: 0.0, y: 1.0, z: 0.0))
-                    .onTapGesture {
-                        let now = Date()
-                        if now.timeIntervalSince(lastTapTime) > 1.2 {
-                            tapCount = 1
-                        } else {
-                            tapCount += 1
-                        }
-                        lastTapTime = now
+                        Circle()
+                            .fill(Color.neuBackground)
+                            .frame(width: 120, height: 120)
+                            .neuCard(cornerRadius: 60)
 
-                        let generator = UIImpactFeedbackGenerator(style: .light)
-                        generator.impactOccurred()
+                        // 림 링 디테일
+                        Circle()
+                            .stroke(Color.neuDarkShadow.opacity(0.4), lineWidth: 1.5)
+                            .frame(width: 100, height: 100)
 
-                        if tapCount >= 6 {
-                            tapCount = 0
-                            let heavyGenerator = UINotificationFeedbackGenerator()
-                            heavyGenerator.notificationOccurred(.success)
-                            onEasterEggTriggered?()
-                        }
+                        // 노브 회전 포인트 인디케이터
+                        Circle()
+                            .fill(Color.blue)
+                            .frame(width: 8, height: 8)
+                            .offset(y: -42)
+                            .rotationEffect(.degrees(knobRotation))
+
+                        Image(systemName: "music.note")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundColor(Color.neuTextMain.opacity(0.85))
                     }
+                    .rotationEffect(.degrees(knobRotation))
                     .gesture(
                         DragGesture()
                             .onChanged { value in
-                                withAnimation(.interactiveSpring()) {
-                                    dragRotationY = Double(value.translation.width) * 0.8
-                                    dragRotationX = -Double(value.translation.height) * 0.8
-                                }
+                                knobRotation = Double(value.translation.width + value.translation.height)
                             }
                             .onEnded { _ in
                                 withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
-                                    dragRotationX = 0
-                                    dragRotationY = 0
+                                    knobRotation = 0
                                 }
                             }
                     )
+                    .onTapGesture {
+                        tapCount += 1
+                        let generator = UIImpactFeedbackGenerator(style: .rigid)
+                        generator.impactOccurred()
+                        if tapCount >= 6 {
+                            tapCount = 0
+                            let haptic = UINotificationFeedbackGenerator()
+                            haptic.notificationOccurred(.success)
+                            onEasterEggTriggered?()
+                        }
+                    }
 
-                    Text("BLACK MARKET")
-                        .font(.system(size: 18, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
-                        .tracking(2)
+                    Text("SKEUOMORPHISM")
+                        .font(.system(size: 16, weight: .black, design: .rounded))
+                        .foregroundColor(Color.neuTextMain)
+                        .tracking(3)
 
-                    Text(langMgr.tr("drag_shield_hint"))
-                        .font(.system(size: 11))
-                        .foregroundColor(.gray.opacity(0.8))
+                    Text(langMgr.tr("drag_dial_hint"))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(Color.neuTextSub)
                 }
-                .padding(.top, 4)
+                .padding(.top, 6)
 
-                VStack(spacing: 14) {
+                // 인포메이션 블록
+                VStack(spacing: 12) {
                     infoRow(title: langMgr.tr("app_version"), value: "v\(appVersion)")
-                    Divider().background(Color.white.opacity(0.1))
-                    infoRow(title: langMgr.tr("build_number"), value: "Build #\(buildNumber)")
-                    Divider().background(Color.white.opacity(0.1))
+                    infoRow(title: langMgr.tr("build_number"), value: "#\(buildNumber)")
                     infoRow(title: langMgr.tr("device_model"), value: DeviceIdManager.getDeviceModelName())
-                    Divider().background(Color.white.opacity(0.1))
                     infoRow(title: langMgr.tr("passkey_auth"), value: langMgr.tr("passkey_disabled"))
-                    Divider().background(Color.white.opacity(0.1))
                     infoRow(title: langMgr.tr("security_sandbox"), value: "TLS 1.3")
                 }
                 .padding(18)
-                .background(
-                    ZStack {
-                        BlurView(style: .systemThinMaterialDark)
-                        Color.white.opacity(0.03)
-                    }
-                )
-                .cornerRadius(18)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18)
-                        .stroke(Color.white.opacity(0.15), lineWidth: 0.8)
-                )
-                .padding(.horizontal, 20)
+                .neuInset(cornerRadius: 20)
+                .padding(.horizontal, 24)
 
                 Spacer()
 
                 Button(action: { presentationMode.wrappedValue.dismiss() }) {
                     Text(langMgr.tr("close"))
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.white)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(Color.neuTextMain)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.white.opacity(0.1))
-                        .cornerRadius(14)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(Color.white.opacity(0.2), lineWidth: 0.8)
-                        )
+                        .padding(.vertical, 16)
+                        .neuCard(cornerRadius: 18)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
             }
         }
     }
 
     func infoRow(title: String, value: String) -> some View {
         HStack {
-            Text(title).font(.system(size: 13)).foregroundColor(.gray)
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(Color.neuTextSub)
             Spacer()
-            Text(value).font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundColor(value == langMgr.tr("passkey_disabled") ? Color.red.opacity(0.8) : .white)
+            Text(value)
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .foregroundColor(Color.neuTextMain)
         }
     }
 }
