@@ -3,165 +3,228 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Black Market - Mail & Device Admin (Supabase)</title>
+    <title>Black Market - Skeuomorphic Admin</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; }
-        body { background: #08080a; color: #fff; min-height: 100vh; padding: 30px 20px; display: flex; justify-content: center; }
-        .container { width: 100%; max-width: 1000px; display: grid; grid-template-columns: 1.15fr 1fr; gap: 24px; }
-        @media (max-width: 860px) { .container { grid-template-columns: 1fr; } }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif; }
         
-        .glass-card {
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(25px);
-            -webkit-backdrop-filter: blur(25px);
-            border-radius: 20px;
-            padding: 26px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+        :root {
+            --bg-color: #e0e5ec;
+            --shadow-light: rgba(255, 255, 255, 0.9);
+            --shadow-dark: rgba(163, 177, 198, 0.6);
+            --text-main: #334155;
+            --text-sub: #64748b;
+            --accent: #3b82f6;
+        }
+
+        body {
+            background: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 36px 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1000px;
+            display: grid;
+            grid-template-columns: 1.15fr 1fr;
+            gap: 28px;
+        }
+        @media (max-width: 860px) { .container { grid-template-columns: 1fr; } }
+
+        /* 뉴모피즘 돌출 카드 */
+        .neu-card {
+            background: var(--bg-color);
+            border-radius: 28px;
+            padding: 28px;
+            box-shadow: 9px 9px 18px var(--shadow-dark), -9px -9px 18px var(--shadow-light);
             height: fit-content;
         }
-        h2 { font-size: 18px; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px; }
-        p.sub { font-size: 12px; color: #777; margin-bottom: 16px; }
-        .field { margin-bottom: 16px; }
-        label { display: block; font-size: 11px; font-weight: 600; color: #999; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
-        input, textarea, select {
-            width: 100%;
-            background: rgba(0, 0, 0, 0.45);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 10px;
-            padding: 10px 12px;
-            color: #fff;
-            font-size: 13px;
-            outline: none;
-            transition: 0.2s;
+
+        h2 {
+            font-size: 19px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            color: #1e293b;
+            margin-bottom: 6px;
         }
-        input:focus, textarea:focus, select:focus { border-color: #3b82f6; box-shadow: 0 0 10px rgba(59,130,246,0.3); }
-        textarea { resize: vertical; min-height: 100px; }
-        
-        .btn {
+        p.sub {
+            font-size: 13px;
+            color: var(--text-sub);
+            margin-bottom: 20px;
+        }
+
+        .field { margin-bottom: 18px; }
+        label {
+            display: block;
+            font-size: 11px;
+            font-weight: 700;
+            color: #475569;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+
+        /* 뉴모피즘 오목한(Inset) 입력창 */
+        input[type="text"], textarea, select {
             width: 100%;
-            padding: 12px;
-            background: #2563eb;
+            background: var(--bg-color);
             border: none;
-            border-radius: 10px;
-            color: #fff;
+            outline: none;
+            border-radius: 14px;
+            padding: 12px 16px;
+            color: var(--text-main);
+            font-size: 13px;
+            box-shadow: inset 4px 4px 8px var(--shadow-dark), inset -4px -4px 8px var(--shadow-light);
+            transition: all 0.2s ease;
+        }
+        input:focus, textarea:focus, select:focus {
+            box-shadow: inset 6px 6px 10px var(--shadow-dark), inset -6px -6px 10px var(--shadow-light);
+        }
+        textarea { resize: vertical; min-height: 110px; }
+
+        /* 뉴모피즘 돌출 버튼 */
+        .neu-btn {
+            background: var(--bg-color);
+            border: none;
+            outline: none;
+            border-radius: 14px;
+            color: #1e293b;
             font-weight: 700;
             font-size: 13px;
             cursor: pointer;
-            transition: 0.2s;
-            margin-top: 6px;
-        }
-        .btn:hover { background: #1d4ed8; }
-        .btn-refresh { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); margin-bottom: 8px; }
-        .btn-refresh:hover { background: rgba(255,255,255,0.15); }
-
-        .btn-toggle-all {
-            background: rgba(59, 130, 246, 0.15);
-            border: 1px solid rgba(59, 130, 246, 0.3);
-            color: #93c5fd;
-            padding: 6px 12px;
-            border-radius: 6px;
-            font-size: 11px;
-            cursor: pointer;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-        .btn-toggle-all:hover { background: #2563eb; color: #fff; }
-        
-        .status { margin-top: 14px; font-size: 12px; text-align: center; display: none; }
-        .success { color: #10b981; }
-        .error { color: #ef4444; }
-
-        .device-list { max-height: 480px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
-        .device-item {
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px;
-            padding: 12px 14px;
+            box-shadow: 6px 6px 12px var(--shadow-dark), -6px -6px 12px var(--shadow-light);
+            transition: all 0.15s ease;
             display: flex;
             align-items: center;
-            gap: 12px;
-            transition: 0.2s;
-            cursor: pointer;
+            justify-content: center;
+            gap: 6px;
         }
-        .device-item:hover { border-color: rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.07); }
+        .neu-btn:hover {
+            box-shadow: 4px 4px 8px var(--shadow-dark), -4px -4px 8px var(--shadow-light);
+        }
+        .neu-btn:active {
+            box-shadow: inset 4px 4px 8px var(--shadow-dark), inset -4px -4px 8px var(--shadow-light);
+        }
+
+        .btn-primary {
+            width: 100%;
+            padding: 14px;
+            color: #2563eb;
+            margin-top: 8px;
+        }
+        .btn-action {
+            padding: 9px 16px;
+            font-size: 12px;
+        }
+
+        /* 기기 목록 영역 */
+        .device-list {
+            max-height: 480px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 14px;
+            padding: 4px;
+        }
+        .device-item {
+            background: var(--bg-color);
+            border-radius: 16px;
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            cursor: pointer;
+            box-shadow: 5px 5px 10px var(--shadow-dark), -5px -5px 10px var(--shadow-light);
+            transition: 0.15s ease;
+        }
+        .device-item:hover {
+            transform: translateY(-1px);
+        }
+        .device-item.active {
+            box-shadow: inset 4px 4px 8px var(--shadow-dark), inset -4px -4px 8px var(--shadow-light);
+        }
+
         .device-item input[type="checkbox"] {
             width: 18px;
             height: 18px;
-            cursor: pointer;
             accent-color: #2563eb;
+            cursor: pointer;
         }
         .device-info { flex: 1; }
-        .device-info .name { font-size: 13px; font-weight: 700; color: #fff; }
-        .device-info .code { font-size: 12px; font-family: monospace; color: #60a5fa; font-weight: 800; letter-spacing: 1px; margin-top: 2px; }
-        .device-info .time { font-size: 10px; color: #666; margin-top: 2px; }
+        .device-info .name { font-size: 13px; font-weight: 700; color: #1e293b; }
+        .device-info .code { font-size: 12px; font-family: monospace; color: #2563eb; font-weight: 800; letter-spacing: 1px; margin-top: 2px; }
+        .device-info .time { font-size: 11px; color: #94a3b8; margin-top: 2px; }
 
-        .upload-section { margin-top: 6px; }
-        .upload-row { display: flex; gap: 10px; align-items: center; }
+        /* 파일 업로드 컴포넌트 */
+        .upload-row { display: flex; gap: 12px; align-items: center; }
         .file-label {
-            background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            padding: 8px 14px;
-            border-radius: 8px;
-            font-size: 12px;
-            font-weight: 600;
+            padding: 10px 18px;
+            border-radius: 12px;
             cursor: pointer;
-            display: inline-block;
-            transition: 0.2s;
         }
-        .file-label:hover { background: rgba(255, 255, 255, 0.15); }
 
         .progress-box {
             display: none;
-            margin-top: 10px;
-            background: rgba(0, 0, 0, 0.4);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            padding: 10px 12px;
+            margin-top: 12px;
+            padding: 12px 14px;
+            border-radius: 14px;
+            box-shadow: inset 3px 3px 6px var(--shadow-dark), inset -3px -3px 6px var(--shadow-light);
         }
         .progress-header {
             display: flex;
             justify-content: space-between;
             font-size: 11px;
-            color: #93c5fd;
+            color: #475569;
             font-family: monospace;
+            font-weight: 600;
             margin-bottom: 6px;
         }
         .progress-bar-bg {
             width: 100%;
-            height: 6px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 3px;
+            height: 8px;
+            background: var(--bg-color);
+            border-radius: 4px;
+            box-shadow: inset 2px 2px 4px var(--shadow-dark), inset -2px -2px 4px var(--shadow-light);
             overflow: hidden;
         }
         .progress-bar-fill {
             width: 0%;
             height: 100%;
             background: linear-gradient(90deg, #3b82f6, #60a5fa);
-            border-radius: 3px;
+            border-radius: 4px;
             transition: width 0.1s ease;
         }
+
+        .status { margin-top: 14px; font-size: 13px; text-align: center; display: none; font-weight: 700; }
+        .success { color: #059669; }
+        .error { color: #e11d48; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <div class="glass-card">
+    <!-- 좌측 기기 목록 패널 -->
+    <div class="neu-card">
         <h2>INSTALLED DEVICES</h2>
         <p class="sub">체크박스를 통해 여러 기기를 선택하여 일괄 발송할 수 있습니다.</p>
         
-        <div style="display: flex; gap: 8px;">
-            <button class="btn btn-refresh" onclick="loadDevices()">기기 목록 새로고침</button>
-            <button class="btn-toggle-all" onclick="toggleSelectAll()">전체 선택/해제</button>
+        <div style="display: flex; gap: 10px;">
+            <button class="neu-btn btn-action" onclick="loadDevices()">목록 새로고침</button>
+            <button class="neu-btn btn-action" onclick="toggleSelectAll()">전체 선택/해제</button>
         </div>
 
         <div id="deviceContainer" class="device-list">
-            <div style="color: #666; font-size: 12px; text-align: center; padding: 20px;">기기 목록을 불러오는 중...</div>
+            <div style="color: #64748b; font-size: 12px; text-align: center; padding: 25px;">기기 목록을 불러오는 중...</div>
         </div>
     </div>
 
-    <div class="glass-card">
+    <!-- 우측 우편 발송 패널 -->
+    <div class="neu-card">
         <h2>SEND POSTAL MAIL</h2>
         <p class="sub">선택된 기기(들) 또는 전체 사용자에게 우편을 발송합니다.</p>
 
@@ -186,20 +249,18 @@
 
         <div class="field">
             <label>미디어 첨부 (사진 / GIF / 동영상)</label>
-            <div class="upload-section">
-                <div class="upload-row">
-                    <input type="file" id="mediaInput" accept="image/*,image/gif,video/*" style="display:none" onchange="handleMediaUploadWithProgress()">
-                    <label for="mediaInput" class="file-label">📁 사진 / GIF / 영상 파일 선택</label>
-                </div>
+            <div class="upload-row">
+                <input type="file" id="mediaInput" accept="image/*,image/gif,video/*" style="display:none" onchange="handleMediaUploadWithProgress()">
+                <label for="mediaInput" class="neu-btn file-label">📁 파일 선택 및 업로드</label>
+            </div>
 
-                <div id="progressBox" class="progress-box">
-                    <div class="progress-header">
-                        <span id="progressText">0% 업로드 중...</span>
-                        <span id="progressBytes">0.0MB / 0.0MB</span>
-                    </div>
-                    <div class="progress-bar-bg">
-                        <div id="progressBarFill" class="progress-bar-fill"></div>
-                    </div>
+            <div id="progressBox" class="progress-box">
+                <div class="progress-header">
+                    <span id="progressText">0% 업로드 중...</span>
+                    <span id="progressBytes">0.0MB / 0.0MB</span>
+                </div>
+                <div class="progress-bar-bg">
+                    <div id="progressBarFill" class="progress-bar-fill"></div>
                 </div>
             </div>
         </div>
@@ -209,7 +270,7 @@
             <textarea id="mailContent" placeholder="발송할 내용...&#10;버튼 예: [공식몰 이동](https://web.black-market.store)"></textarea>
         </div>
 
-        <button class="btn" onclick="sendMail()">우편 일괄 발송하기</button>
+        <button class="neu-btn btn-primary" onclick="sendMail()">우편 일괄 발송하기</button>
         <div id="statusBox" class="status"></div>
     </div>
 </div>
@@ -238,13 +299,16 @@
         const checkboxes = document.querySelectorAll('.device-checkbox');
         if (checkboxes.length === 0) return;
         const anyUnchecked = Array.from(checkboxes).some(cb => !cb.checked);
-        checkboxes.forEach(cb => cb.checked = anyUnchecked);
+        checkboxes.forEach(cb => {
+            cb.checked = anyUnchecked;
+            cb.closest('.device-item').classList.toggle('active', anyUnchecked);
+        });
         updateSelectedCount();
     }
 
     async function loadDevices() {
         const container = document.getElementById('deviceContainer');
-        container.innerHTML = '<div style="color: #666; font-size: 12px; text-align: center; padding: 20px;">기기 목록을 확인 중...</div>';
+        container.innerHTML = '<div style="color: #64748b; font-size: 12px; text-align: center; padding: 25px;">기기 목록을 확인 중...</div>';
 
         try {
             const { data, error } = await db.from('devices').select('*').order('last_seen', { ascending: false });
@@ -254,10 +318,10 @@
 
             if (allDevicesList.length === 0) {
                 container.innerHTML = `
-                    <div style="color: #888; font-size: 12px; text-align: center; padding: 25px; line-height: 1.6;">
-                        <b style="color: #60a5fa;">Supabase 연결 성공!</b><br>
+                    <div style="color: #64748b; font-size: 12px; text-align: center; padding: 30px; line-height: 1.6;">
+                        <b style="color: #2563eb;">연결 완료</b><br>
                         등록된 기기가 없습니다.<br>
-                        앱을 1회 실행하면 기기가 자동 등록됩니다.
+                        앱을 실행하면 자동으로 등록됩니다.
                     </div>`;
                 updateSelectedCount();
                 return;
@@ -279,6 +343,7 @@
                     if (e.target.tagName !== 'INPUT') {
                         const cb = item.querySelector('.device-checkbox');
                         cb.checked = !cb.checked;
+                        item.classList.toggle('active', cb.checked);
                         updateSelectedCount();
                     }
                 });
@@ -286,11 +351,10 @@
             });
             updateSelectedCount();
         } catch (e) {
-            container.innerHTML = `<div style="color: #ef4444; font-size: 12px; text-align: center; padding: 20px;">${e.message || e}</div>`;
+            container.innerHTML = `<div style="color: #e11d48; font-size: 12px; text-align: center; padding: 20px;">${e.message || e}</div>`;
         }
     }
 
-    // XHR 기반 Supabase Storage 실시간 진행률(0.1MB / 1.0MB, %) 업로드 (GIF 포함)
     function handleMediaUploadWithProgress() {
         const fileInput = document.getElementById('mediaInput');
         const file = fileInput.files[0];
@@ -303,7 +367,7 @@
 
         progressBox.style.display = 'block';
         progressBarFill.style.width = '0%';
-        progressText.style.color = '#93c5fd';
+        progressText.style.color = '#334155';
         progressText.innerText = '0% 업로드 중...';
 
         const fileExt = file.name.split('.').pop();
@@ -312,7 +376,6 @@
 
         const xhr = new XMLHttpRequest();
         xhr.open('POST', uploadUrl, true);
-
         xhr.setRequestHeader('apikey', SUPABASE_ANON_KEY);
         xhr.setRequestHeader('Authorization', `Bearer ${SUPABASE_ANON_KEY}`);
         xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
@@ -323,7 +386,6 @@
                 const percent = Math.round((e.loaded / e.total) * 100);
                 const loadedMB = (e.loaded / (1024 * 1024)).toFixed(1);
                 const totalMB = (e.total / (1024 * 1024)).toFixed(1);
-
                 progressBarFill.style.width = `${percent}%`;
                 progressText.innerText = `${percent}% 업로드 중...`;
                 progressBytes.innerText = `${loadedMB}MB / ${totalMB}MB`;
@@ -333,7 +395,7 @@
         xhr.onload = function () {
             if (xhr.status >= 200 && xhr.status < 300) {
                 progressBarFill.style.width = '100%';
-                progressText.style.color = '#10b981';
+                progressText.style.color = '#059669';
                 progressText.innerText = '업로드 완료!';
 
                 const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/mail-images/${fileName}`;
@@ -343,15 +405,15 @@
                 setTimeout(() => {
                     progressBox.style.display = 'none';
                     fileInput.value = '';
-                }, 3500);
+                }, 3000);
             } else {
-                progressText.style.color = '#ef4444';
-                progressText.innerText = '업로드 실패 (Storage 정책 확인 필요)';
+                progressText.style.color = '#e11d48';
+                progressText.innerText = '업로드 실패';
             }
         };
 
         xhr.onerror = function () {
-            progressText.style.color = '#ef4444';
+            progressText.style.color = '#e11d48';
             progressText.innerText = '네트워크 오류 발생';
         };
 
@@ -369,7 +431,6 @@
         }
 
         let targetIds = [];
-
         if (targetType === 'ALL') {
             targetIds = ['ALL'];
         } else if (targetType === 'CUSTOM') {
@@ -388,7 +449,7 @@
             targetIds = Array.from(checkedBoxes).map(cb => cb.value);
         }
 
-        showStatus(`우편 발송 중... (총 ${targetIds.length}개 대상)`, true);
+        showStatus(`우편 발송 중... (총 ${targetIds.length}대 대상)`, true);
 
         const today = new Date().toISOString().split('T')[0];
         const insertRows = targetIds.map(id => ({
