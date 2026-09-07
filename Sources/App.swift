@@ -5,6 +5,131 @@ import AuthenticationServices
 import CryptoKit
 import QuickLook
 
+// MARK: - 지원 언어 및 자체 다국어 매니저 (파일 추가 없이 코드 내 완결)
+enum AppLanguage: String, CaseIterable, Identifiable {
+    case ko = "ko"
+    case en = "en"
+    case ja = "ja"
+    case zh = "zh"
+    case ru = "ru"
+    case fr = "fr"
+
+    var id: String { self.rawValue }
+
+    var displayName: String {
+        switch self {
+        case .ko: return "한국어 (Korean)"
+        case .en: return "English"
+        case .ja: return "日本語 (Japanese)"
+        case .zh: return "中文 (Chinese)"
+        case .ru: return "Русский (Russian)"
+        case .fr: return "Français (French)"
+        }
+    }
+}
+
+class LocalizationManager: ObservableObject {
+    static let shared = LocalizationManager()
+
+    @AppStorage("bm_selected_language") var currentLanguageRaw: String = "ko"
+
+    var currentLanguage: AppLanguage {
+        get { AppLanguage(rawValue: currentLanguageRaw) ?? .ko }
+        set {
+            currentLanguageRaw = newValue.rawValue
+            objectWillChange.send()
+        }
+    }
+
+    private let dictionary: [String: [AppLanguage: String]] = [
+        // 메인/공통
+        "connecting": [
+            .ko: "연결 중...", .en: "CONNECTING...", .ja: "接続中...", .zh: "连接中...", .ru: "ПОДКЛЮЧЕНИЕ...", .fr: "CONNEXION..."
+        ],
+        "close": [
+            .ko: "닫기", .en: "Close", .ja: "閉じる", .zh: "关闭", .ru: "Закрыть", .fr: "Fermer"
+        ],
+        "settings": [
+            .ko: "설정", .en: "Settings", .ja: "設定", .zh: "设置", .ru: "Настройки", .fr: "Paramètres"
+        ],
+        "language_setting": [
+            .ko: "언어 설정", .en: "Language", .ja: "言語設定", .zh: "语言设置", .ru: "Язык", .fr: "Langue"
+        ],
+        "language_sub": [
+            .ko: "앱 내 모든 인터페이스 언어를 변경합니다.",
+            .en: "Change all application interface languages.",
+            .ja: "アプリ内のすべての言語を変更します。",
+            .zh: "更改应用内的所有界面语言。",
+            .ru: "Изменить язык интерфейса приложения.",
+            .fr: "Modifier la langue de l'interface de l'application."
+        ],
+        // 우편함
+        "mailbox": [
+            .ko: "우편함", .en: "Mailbox", .ja: "受信箱", .zh: "收件箱", .ru: "Почтовый ящик", .fr: "Boîte de réception"
+        ],
+        "mailbox_sub": [
+            .ko: "새로운 공지 및 개별 메시지를 확인합니다.",
+            .en: "Check notices and private messages.",
+            .ja: "新しいお知らせや個別メッセージを確認します。",
+            .zh: "查看新公告和个人私信。",
+            .ru: "Просматривайте уведомления и личные сообщения.",
+            .fr: "Consultez les annonces et les messages privés."
+        ],
+        "copy_number": [
+            .ko: "번호 복사", .en: "Copy ID", .ja: "番号コピー", .zh: "复制编号", .ru: "Копировать ID", .fr: "Copier ID"
+        ],
+        "copied": [
+            .ko: "복사됨!", .en: "Copied!", .ja: "コピー完了!", .zh: "已复制!", .ru: "Скопировано!", .fr: "Copié !"
+        ],
+        "empty_mailbox": [
+            .ko: "받은 우편이 없습니다.", .en: "No mails available.", .ja: "受信した郵便はありません。", .zh: "暂无收到的邮件。", .ru: "Писем нет.", .fr: "Aucun courrier reçu."
+        ],
+        "download_and_preview": [
+            .ko: "동영상 다운로드 및 미리보기", .en: "Download & Preview Video", .ja: "動画をダウンロードしてプレビュー", .zh: "下载并预览视频", .ru: "Скачать и посмотреть видео", .fr: "Télécharger et prévisualiser la vidéo"
+        ],
+        "open_preview": [
+            .ko: "미리보기 열기", .en: "Open Preview", .ja: "プレビューを開く", .zh: "打开预览", .ru: "Открыть просмотр", .fr: "Ouvrir l'aperçu"
+        ],
+        "downloaded_tag": [
+            .ko: "다운로드 완료됨", .en: "Downloaded", .ja: "ダウンロード完了", .zh: "已下载", .ru: "Скачано", .fr: "Téléchargé"
+        ],
+        "downloading": [
+            .ko: "다운로드 중...", .en: "Downloading...", .ja: "ダウンロード中...", .zh: "下载中...", .ru: "Загрузка...", .fr: "Téléchargement..."
+        ],
+        // 앱 정보
+        "drag_shield_hint": [
+            .ko: "방패를 손가락으로 드래그하여 회전시켜보세요",
+            .en: "Drag the shield with your finger to rotate it",
+            .ja: "指でシールドをドラッグして回転させてみてください",
+            .zh: "用手指拖动盾牌进行旋转",
+            .ru: "Проведите пальцем по щиту, чтобы повернуть его",
+            .fr: "Faites glisser le bouclier avec votre doigt pour le faire pivoter"
+        ],
+        "app_version": [
+            .ko: "애플리케이션 버전", .en: "Application Version", .ja: "アプリバージョン", .zh: "应用程序版本", .ru: "Версия приложения", .fr: "Version de l'application"
+        ],
+        "build_number": [
+            .ko: "빌드 번호", .en: "Build Number", .ja: "ビルド番号", .zh: "内部版本号", .ru: "Номер сборки", .fr: "Numéro de build"
+        ],
+        "device_model": [
+            .ko: "기기 식별 모델", .en: "Device Model", .ja: "端末識別モデル", .zh: "设备识别型号", .ru: "Модель устройства", .fr: "Modèle de l'appareil"
+        ],
+        "passkey_auth": [
+            .ko: "생체인증 패스키", .en: "Passkey Biometrics", .ja: "生体認証パスキー", .zh: "生物识别通行密钥", .ru: "Биометрический ключ", .fr: "Clé d'accès biométrique"
+        ],
+        "passkey_disabled": [
+            .ko: "비활성화됨", .en: "Disabled", .ja: "無効", .zh: "已停用", .ru: "Отключено", .fr: "Désactivé"
+        ],
+        "security_sandbox": [
+            .ko: "보안 샌드박스", .en: "Security Sandbox", .ja: "セキュリティサンドボックス", .zh: "安全沙盒", .ru: "Песочница безопасности", .fr: "Bac à sable de sécurité"
+        ]
+    ]
+
+    func tr(_ key: String) -> String {
+        return dictionary[key]?[currentLanguage] ?? dictionary[key]?[.ko] ?? key
+    }
+}
+
 // MARK: - 우편 모델
 struct MailItem: Identifiable, Codable {
     let id: Int
@@ -79,7 +204,7 @@ struct DeviceIdManager {
     }
 }
 
-// MARK: - 미디어 영구 캐시 및 다운로드 매니저 (중복 다운로드 방지)
+// MARK: - 미디어 영구 캐시 및 다운로드 매니저
 class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelegate {
     static let shared = MediaDownloadManager()
 
@@ -91,7 +216,6 @@ class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelega
     private var completionHandler: ((URL?) -> Void)?
     private var isVideoFile: Bool = false
 
-    // 영구 캐시 저장 경로
     private var cacheDirectory: URL {
         let paths = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
         let dir = paths[0].appendingPathComponent("MailMediaCache", isDirectory: true)
@@ -101,14 +225,12 @@ class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelega
         return dir
     }
 
-    // URL 기반 고유 캐시 파일 경로 생성
     func getCachedFileURL(for remoteURL: URL) -> URL {
         let ext = remoteURL.pathExtension.isEmpty ? "mp4" : remoteURL.pathExtension
         let hash = SHA256.hash(data: Data(remoteURL.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
         return cacheDirectory.appendingPathComponent("\(hash).\(ext)")
     }
 
-    // 이미 다운로드된 파일인지 검사
     func isMediaCached(for remoteURL: URL) -> Bool {
         let cachedURL = getCachedFileURL(for: remoteURL)
         return FileManager.default.fileExists(atPath: cachedURL.path)
@@ -117,7 +239,6 @@ class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelega
     func downloadOrGetMedia(url: URL, isVideo: Bool, completion: @escaping (URL?) -> Void) {
         let cachedURL = getCachedFileURL(for: url)
 
-        // 1. 이미 저장되어 있다면 즉시 로컬 파일 반환 (재다운로드 생략)
         if FileManager.default.fileExists(atPath: cachedURL.path) {
             let generator = UIImpactFeedbackGenerator(style: .light)
             generator.impactOccurred()
@@ -125,7 +246,6 @@ class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelega
             return
         }
 
-        // 2. 캐시가 없을 때만 다운로드 시작
         self.completionHandler = completion
         self.isVideoFile = isVideo
         self.activeURL = url
@@ -148,7 +268,7 @@ class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelega
             self.loadedSizeText = String(format: "%.1fMB / %.1fMB", loadedMB, totalMB)
         } else {
             let loadedMB = Double(totalBytesWritten) / (1024 * 1024)
-            self.loadedSizeText = String(format: "%.1fMB 다운로드 중", loadedMB)
+            self.loadedSizeText = String(format: "%.1fMB", loadedMB)
         }
     }
 
@@ -190,7 +310,7 @@ class MediaDownloadManager: NSObject, ObservableObject, URLSessionDownloadDelega
     }
 }
 
-// MARK: - [닫기] 버튼이 탑재된 시스템 QuickLook 뷰어
+// MARK: - 닫기 버튼이 포함된 QuickLook 뷰어
 struct QuickLookPreviewView: UIViewControllerRepresentable {
     let fileURL: URL
     @Environment(\.presentationMode) var presentationMode
@@ -205,7 +325,7 @@ struct QuickLookPreviewView: UIViewControllerRepresentable {
         
         let nav = UINavigationController(rootViewController: qlController)
         qlController.navigationItem.leftBarButtonItem = UIBarButtonItem(
-            title: "닫기",
+            title: LocalizationManager.shared.tr("close"),
             style: .done,
             target: context.coordinator,
             action: #selector(Coordinator.dismissSelf)
@@ -242,7 +362,7 @@ struct QuickLookPreviewView: UIViewControllerRepresentable {
     }
 }
 
-// MARK: - Video.js 웹킷 플레이어
+// MARK: - Video.js 플레이어
 struct VideoJSPlayerView: UIViewRepresentable {
     let videoURL: URL
 
@@ -321,10 +441,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 @main
 struct BlackMarketApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var langMgr = LocalizationManager.shared
+
     @State private var currentURL: URL = URL(string: "https://web.black-market.store")!
     @State private var isLoading: Bool = true
     @State private var showInfoSheet: Bool = false
     @State private var showMailSheet: Bool = false
+    @State private var showSettingsSheet: Bool = false
     
     @State private var canGoBack: Bool = false
     @State private var canGoForward: Bool = false
@@ -362,6 +485,7 @@ struct BlackMarketApp: App {
                         onForward: { webAction = .goForward },
                         onReload: { webAction = .reload },
                         onMail: { showMailSheet = true },
+                        onSettings: { showSettingsSheet = true },
                         onInfo: { showInfoSheet = true }
                     )
                     .padding(.bottom, max(geometry.safeAreaInsets.bottom, 16) + 28)
@@ -373,6 +497,9 @@ struct BlackMarketApp: App {
                             .zIndex(2)
                     }
                 }
+            }
+            .sheet(isPresented: $showSettingsSheet) {
+                SettingsView()
             }
             .sheet(isPresented: $showInfoSheet) {
                 AppInfoView(onEasterEggTriggered: {
@@ -404,11 +531,12 @@ struct BlackMarketApp: App {
                     }
                 }
             }
+            .environmentObject(langMgr)
         }
     }
 }
 
-// MARK: - 하단 리퀴드 글래스 컨트롤 바
+// MARK: - 하단 리퀴드 글래스 컨트롤 바 (설정 톱니바퀴 추가)
 struct LiquidGlassNavigationBar: View {
     let canGoBack: Bool
     let canGoForward: Bool
@@ -416,10 +544,11 @@ struct LiquidGlassNavigationBar: View {
     let onForward: () -> Void
     let onReload: () -> Void
     let onMail: () -> Void
+    let onSettings: () -> Void
     let onInfo: () -> Void
 
     var body: some View {
-        HStack(spacing: 24) {
+        HStack(spacing: 20) {
             Button(action: onBack) {
                 Image(systemName: "chevron.backward")
                     .font(.system(size: 16, weight: .bold))
@@ -450,13 +579,20 @@ struct LiquidGlassNavigationBar: View {
                     .foregroundColor(.white.opacity(0.85))
             }
 
+            // 설정 버튼
+            Button(action: onSettings) {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.85))
+            }
+
             Button(action: onInfo) {
                 Image(systemName: "info.circle")
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(.white.opacity(0.85))
             }
         }
-        .padding(.horizontal, 22)
+        .padding(.horizontal, 20)
         .padding(.vertical, 12)
         .background(
             ZStack {
@@ -493,11 +629,108 @@ struct LiquidGlassNavigationBar: View {
     }
 }
 
-// MARK: - 우편 본문 뷰 (영구 캐시 확인 & 1회 다운로드 즉시 열기)
+// MARK: - 설정 모달 (언어 실시간 변경)
+struct SettingsView: View {
+    @Environment(\.presentationMode) var presentationMode
+    @ObservedObject var langMgr = LocalizationManager.shared
+
+    var body: some View {
+        ZStack {
+            Color(red: 0.05, green: 0.05, blue: 0.07).edgesIgnoringSafeArea(.all)
+
+            VStack(spacing: 20) {
+                Capsule()
+                    .fill(Color.white.opacity(0.25))
+                    .frame(width: 36, height: 4)
+                    .padding(.top, 12)
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(langMgr.tr("settings"))
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundColor(.white)
+                        Text(langMgr.tr("language_sub"))
+                            .font(.system(size: 12))
+                            .foregroundColor(.gray)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(langMgr.tr("language_setting"))
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.blue)
+                        .padding(.horizontal, 4)
+
+                    VStack(spacing: 4) {
+                        ForEach(AppLanguage.allCases) { lang in
+                            Button(action: {
+                                langMgr.currentLanguage = lang
+                                let generator = UIImpactFeedbackGenerator(style: .medium)
+                                generator.impactOccurred()
+                            }) {
+                                HStack {
+                                    Text(lang.displayName)
+                                        .font(.system(size: 14, weight: langMgr.currentLanguage == lang ? .bold : .medium))
+                                        .foregroundColor(langMgr.currentLanguage == lang ? .white : .gray)
+                                    Spacer()
+                                    if langMgr.currentLanguage == lang {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundColor(.blue)
+                                            .font(.system(size: 16))
+                                    }
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 13)
+                                .background(langMgr.currentLanguage == lang ? Color.white.opacity(0.08) : Color.clear)
+                                .cornerRadius(10)
+                            }
+                        }
+                    }
+                    .padding(6)
+                    .background(
+                        ZStack {
+                            BlurView(style: .systemThinMaterialDark)
+                            Color.white.opacity(0.03)
+                        }
+                    )
+                    .cornerRadius(16)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
+                    )
+                }
+                .padding(.horizontal, 20)
+
+                Spacer()
+
+                Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                    Text(langMgr.tr("close"))
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(14)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 0.8)
+                        )
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+            }
+        }
+    }
+}
+
+// MARK: - 우편 본문 뷰
 struct MailContentView: View {
     let content: String
     let onNavigateURL: ((URL) -> Void)?
 
+    @ObservedObject var langMgr = LocalizationManager.shared
     @ObservedObject var downloadManager = MediaDownloadManager.shared
     @State private var quickLookURL: URL? = nil
     @State private var updateTrigger: Bool = false
@@ -577,7 +810,7 @@ struct MailContentView: View {
                     if downloadManager.isDownloading && downloadManager.activeURL == vidURL {
                         VStack(alignment: .trailing, spacing: 5) {
                             HStack {
-                                Text("다운로드 중...")
+                                Text(langMgr.tr("downloading"))
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundColor(.white)
                                 Spacer()
@@ -602,7 +835,7 @@ struct MailContentView: View {
                         }) {
                             HStack(spacing: 5) {
                                 Image(systemName: isCached ? "play.circle.fill" : "arrow.down.circle")
-                                Text(isCached ? "미리보기 열기" : "동영상 다운로드 및 미리보기")
+                                Text(isCached ? langMgr.tr("open_preview") : langMgr.tr("download_and_preview"))
                             }
                             .font(.system(size: 11, weight: .bold))
                             .foregroundColor(isCached ? .green : .blue)
@@ -652,14 +885,14 @@ struct MailContentView: View {
                                 .tint(.blue)
                         }
                     } else if isCached {
-                        Text("다운로드 완료됨")
+                        Text(langMgr.tr("downloaded_tag"))
                             .font(.system(size: 10, weight: .medium))
                             .foregroundColor(.gray.opacity(0.8))
                     }
                 }
             }
 
-            // [버튼명](링크) 버튼
+            // 버튼 렌더링
             if !parsedButtons.isEmpty {
                 VStack(spacing: 8) {
                     ForEach(parsedButtons) { btn in
@@ -690,7 +923,6 @@ struct MailContentView: View {
                 .padding(.top, 4)
             }
         }
-        // [닫기] 버튼이 포함된 QuickLook 미리보기 모달
         .fullScreenCover(item: Binding(
             get: { quickLookURL.map { IdentifiableURL(url: $0) } },
             set: { quickLookURL = $0?.url }
@@ -709,6 +941,7 @@ struct IdentifiableURL: Identifiable {
 // MARK: - 우편함 모달
 struct MailboxView: View {
     @Environment(\.presentationMode) var presentationMode
+    @ObservedObject var langMgr = LocalizationManager.shared
     var onNavigateURL: ((URL) -> Void)? = nil
 
     @State private var mails: [MailItem] = []
@@ -730,10 +963,10 @@ struct MailboxView: View {
 
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("우편함")
+                        Text(langMgr.tr("mailbox"))
                             .font(.system(size: 20, weight: .bold))
                             .foregroundColor(.white)
-                        Text("새로운 공지 및 개별 메시지를 확인합니다.")
+                        Text(langMgr.tr("mailbox_sub"))
                             .font(.system(size: 12))
                             .foregroundColor(.gray)
                     }
@@ -752,7 +985,7 @@ struct MailboxView: View {
                             copySuccess = true
                             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copySuccess = false }
                         }) {
-                            Text(copySuccess ? "복사됨!" : "번호 복사")
+                            Text(copySuccess ? langMgr.tr("copied") : langMgr.tr("copy_number"))
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundColor(copySuccess ? .green : .blue)
                         }
@@ -781,7 +1014,7 @@ struct MailboxView: View {
                         Image(systemName: "tray")
                             .font(.system(size: 36))
                             .foregroundColor(.gray.opacity(0.5))
-                        Text("받은 우편이 없습니다.")
+                        Text(langMgr.tr("empty_mailbox"))
                             .font(.system(size: 14))
                             .foregroundColor(.gray)
                     }
@@ -822,7 +1055,7 @@ struct MailboxView: View {
                 }
 
                 Button(action: { presentationMode.wrappedValue.dismiss() }) {
-                    Text("닫기")
+                    Text(langMgr.tr("close"))
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
@@ -1076,6 +1309,7 @@ struct WebViewContainer: UIViewRepresentable {
 
 // MARK: - 로딩 오버레이
 struct CustomLoadingOverlay: View {
+    @ObservedObject var langMgr = LocalizationManager.shared
     @State private var isPulsing = false
     @State private var rotateDegree: Double = 0
 
@@ -1098,7 +1332,7 @@ struct CustomLoadingOverlay: View {
                         Text("MARKET").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundColor(.gray).tracking(1.8)
                     }
                 }
-                Text("CONNECTING...").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundColor(.gray.opacity(0.8)).tracking(2)
+                Text(langMgr.tr("connecting")).font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundColor(.gray.opacity(0.8)).tracking(2)
             }
         }
         .onAppear {
@@ -1111,6 +1345,7 @@ struct CustomLoadingOverlay: View {
 // MARK: - 앱 정보 모달 (방패 6번 터치 이스터에그)
 struct AppInfoView: View {
     @Environment(\.presentationMode) var presentationMode
+    @ObservedObject var langMgr = LocalizationManager.shared
     var onEasterEggTriggered: (() -> Void)? = nil
 
     @State private var dragRotationX: Double = 0
@@ -1194,22 +1429,22 @@ struct AppInfoView: View {
                         .foregroundColor(.white)
                         .tracking(2)
 
-                    Text("방패를 손가락으로 드래그하여 회전시켜보세요")
+                    Text(langMgr.tr("drag_shield_hint"))
                         .font(.system(size: 11))
                         .foregroundColor(.gray.opacity(0.8))
                 }
                 .padding(.top, 4)
 
                 VStack(spacing: 14) {
-                    infoRow(title: "애플리케이션 버전", value: "v\(appVersion)")
+                    infoRow(title: langMgr.tr("app_version"), value: "v\(appVersion)")
                     Divider().background(Color.white.opacity(0.1))
-                    infoRow(title: "빌드 번호", value: "Build #\(buildNumber)")
+                    infoRow(title: langMgr.tr("build_number"), value: "Build #\(buildNumber)")
                     Divider().background(Color.white.opacity(0.1))
-                    infoRow(title: "기기 식별 모델", value: DeviceIdManager.getDeviceModelName())
+                    infoRow(title: langMgr.tr("device_model"), value: DeviceIdManager.getDeviceModelName())
                     Divider().background(Color.white.opacity(0.1))
-                    infoRow(title: "생체인증 패스키", value: "비활성화됨")
+                    infoRow(title: langMgr.tr("passkey_auth"), value: langMgr.tr("passkey_disabled"))
                     Divider().background(Color.white.opacity(0.1))
-                    infoRow(title: "보안 샌드박스", value: "TLS 1.3 암호화")
+                    infoRow(title: langMgr.tr("security_sandbox"), value: "TLS 1.3")
                 }
                 .padding(18)
                 .background(
@@ -1228,7 +1463,7 @@ struct AppInfoView: View {
                 Spacer()
 
                 Button(action: { presentationMode.wrappedValue.dismiss() }) {
-                    Text("닫기")
+                    Text(langMgr.tr("close"))
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
@@ -1251,7 +1486,7 @@ struct AppInfoView: View {
             Text(title).font(.system(size: 13)).foregroundColor(.gray)
             Spacer()
             Text(value).font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundColor(value == "비활성화됨" ? Color.red.opacity(0.8) : .white)
+                .foregroundColor(value == langMgr.tr("passkey_disabled") ? Color.red.opacity(0.8) : .white)
         }
     }
 }
